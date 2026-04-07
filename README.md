@@ -95,7 +95,7 @@ Create:
 
 ### 2. Enable the workflow
 
-The workflow runs every hour and can also be started manually from the Actions tab.
+The workflow runs every 20 minutes and can also be started manually from the Actions tab.
 
 ### 3. Optional behavior
 
@@ -119,7 +119,7 @@ Once the bot is running, you can interact with it via Telegram:
 - `/status` - Show bot status and last check time
 - `/stop` - Stop the bot
 
-The bot will automatically check for appointments every `CHECK_INTERVAL` seconds (default: 1 hour).
+The bot will automatically check for appointments every `CHECK_INTERVAL` seconds (default: 20 minutes).
 
 ## How It Works
 
