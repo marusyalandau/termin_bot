@@ -30,6 +30,16 @@ def _truthy(value: str | None, default: bool = False) -> bool:
 def build_message(result: dict) -> str:
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    if result.get("cloudflare_blocked"):
+        ip = result.get("blocked_ip", "unbekannt")
+        return (
+            "🚫 Halle Termincheck - Cloudflare blockiert\n"
+            f"Zeit: {now_utc}\n"
+            f"IP: {ip}\n"
+            "Status: Diese IP wurde von Cloudflare geblockt.\n"
+            "Lösung: Anderen Server / Self-hosted Runner verwenden."
+        )
+
     if result.get("error"):
         return (
             "❌ Halle Termincheck Fehler\n"
@@ -74,7 +84,9 @@ async def main() -> int:
 
     result = await check_appointments()
 
-    if (not result.get("available")) and (not result.get("error")) and (not send_no_appointment_message):
+    # Always send Cloudflare block alerts (actionable, machine config issue)
+    is_cloudflare = result.get("cloudflare_blocked", False)
+    if (not result.get("available")) and (not result.get("error")) and (not send_no_appointment_message) and (not is_cloudflare):
         logger.info("No appointments found; SEND_NO_APPOINTMENT_MESSAGE is false, skipping message.")
         return 0
 

@@ -107,6 +107,27 @@ async def check_appointments():
             # Wait for page to fully load
             await page.wait_for_timeout(5000)
             await _dismiss_cookie_banner(page)
+
+            # Detect Cloudflare block before attempting any interaction
+            body_text_early = await page.locator("body").text_content() or ""
+            if (
+                "sorry, you have been blocked" in body_text_early.lower()
+                or "cloudflare ray id" in body_text_early.lower()
+                or "enable cookies" in body_text_early.lower() and "cloudflare" in body_text_early.lower()
+            ):
+                ip_match = re.search(r'\d+\.\d+\.\d+\.\d+', body_text_early)
+                detected_ip = ip_match.group(0) if ip_match else "unknown"
+                logger.warning("Cloudflare block detected! Blocked IP: %s", detected_ip)
+                await browser.close()
+                return {
+                    'available': False,
+                    'message': 'Cloudflare block detected',
+                    'slots': [],
+                    'error': None,
+                    'cloudflare_blocked': True,
+                    'blocked_ip': detected_ip,
+                }
+
             logger.info("Page loaded, waiting for buttons to appear...")
             
             # Step 1: Click on "Staatsangehörigkeitsangelegenheiten"
