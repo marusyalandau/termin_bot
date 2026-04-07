@@ -68,6 +68,11 @@ async def _click_text(page, text, timeout=30000):
         raise TimeoutError(f"Could not click element containing '{text}'")
 
 
+async def _has_text(page, text):
+    body_text = await page.locator("body").text_content()
+    return text.lower() in (body_text or "").lower()
+
+
 async def check_appointments():
     """
     Check for available appointments on the Halle website.
@@ -106,6 +111,7 @@ async def check_appointments():
             
             # Step 1: Click on "Staatsangehörigkeitsangelegenheiten"
             logger.info("Looking for 'Staatsangehörigkeitsangelegenheiten' button...")
+            first_step_ok = False
             try:
                 try:
                     await _click_text(page, "Staatsangehörigkeitsangelegenheiten")
@@ -113,34 +119,33 @@ async def check_appointments():
                     await _click_text(page, "Staatsangehorigkeitsangelegenheiten")
                 logger.info("Clicked 'Staatsangehörigkeitsangelegenheiten'")
                 await page.wait_for_timeout(3000)
+                first_step_ok = True
             except Exception as e:
-                body_text = await page.locator("body").text_content()
-                present = "Staatsangehörigkeitsangelegenheiten" in (body_text or "")
-                logger.error(f"Error clicking Staatsangehörigkeitsangelegenheiten: {e}")
-                await browser.close()
-                return {
-                    'available': False,
-                    'message': 'Error in first step',
-                    'slots': [],
-                    'error': f"{e} | text_present={present}"
-                }
+                present = await _has_text(page, "Staatsangehörigkeitsangelegenheiten")
+                logger.warning(
+                    "Could not click first category; will try direct service selection. error=%s text_present=%s",
+                    e,
+                    present,
+                )
             
             # Step 2: Click on "02. Antrag Einbürgerung"
             logger.info("Looking for '02. Antrag Einbürgerung' button...")
             try:
-                await _click_text(page, "02. Antrag Einbürgerung")
+                try:
+                    await _click_text(page, "02. Antrag Einbürgerung")
+                except Exception:
+                    await _click_text(page, "Antrag Einbürgerung")
                 logger.info("Clicked '02. Antrag Einbürgerung'")
                 await page.wait_for_timeout(4000)
             except Exception as e:
-                body_text = await page.locator("body").text_content()
-                present = "02. Antrag Einbürgerung" in (body_text or "")
+                present = await _has_text(page, "02. Antrag Einbürgerung") or await _has_text(page, "Antrag Einbürgerung")
                 logger.error(f"Error clicking Antrag Einbürgerung: {e}")
                 await browser.close()
                 return {
                     'available': False,
                     'message': 'Error in second step',
                     'slots': [],
-                    'error': f"{e} | text_present={present}"
+                    'error': f"{e} | text_present={present} | first_step_ok={first_step_ok}"
                 }
             
             # Step 3: Access the reservation page and check for available appointments
