@@ -10,6 +10,63 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+async def _dismiss_cookie_banner(page):
+    for text in ("Alle akzeptieren", "Accept all", "Akzeptieren"):
+        try:
+            button = page.get_by_text(text, exact=False).first
+            await button.click(timeout=3000)
+            logger.info("Dismissed cookie banner")
+            await page.wait_for_timeout(1000)
+            return
+        except Exception:
+            continue
+
+
+async def _click_text(page, text, timeout=30000):
+    await page.wait_for_function(
+        "target => document.body && document.body.innerText.includes(target)",
+        arg=text,
+        timeout=timeout,
+    )
+
+    locator = page.get_by_text(text, exact=False).first
+    try:
+        await locator.click(timeout=5000)
+        return
+    except Exception as exc:
+        logger.info("Regular click for '%s' failed: %s", text, exc)
+
+    clicked = await page.evaluate(
+        """
+        target => {
+            const elements = Array.from(document.querySelectorAll('*'));
+            for (const element of elements) {
+                const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!content.includes(target)) {
+                    continue;
+                }
+
+                const clickable = element.closest(
+                    '.service_selector, .category, button, a, label, div'
+                ) || element;
+
+                clickable.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                }));
+                return true;
+            }
+            return false;
+        }
+        """,
+        text,
+    )
+
+    if not clicked:
+        raise TimeoutError(f"Could not click element containing '{text}'")
+
+
 async def check_appointments():
     """
     Check for available appointments on the Halle website.
@@ -28,60 +85,58 @@ async def check_appointments():
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            context = await browser.new_context(
+                locale="de-DE",
+                viewport={"width": 1440, "height": 1200},
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+            )
+            page = await context.new_page()
             
             logger.info(f"Opening direct booking URL")
             await page.goto(url, wait_until="networkidle")
             
             # Wait for page to fully load
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(5000)
+            await _dismiss_cookie_banner(page)
             logger.info("Page loaded, waiting for buttons to appear...")
             
             # Step 1: Click on "Staatsangehörigkeitsangelegenheiten"
             logger.info("Looking for 'Staatsangehörigkeitsangelegenheiten' button...")
             try:
-                # Wait for the button to be visible (with timeout)
-                staatsangehoerigkeits_button = page.locator(
-                    "text=Staatsangehörigkeitsangelegenheiten"
-                ).first
-                
-                # Wait up to 10 seconds for button to be visible
-                await staatsangehoerigkeits_button.wait_for(state="visible", timeout=10000)
-                logger.info("Button found, clicking...")
-                await staatsangehoerigkeits_button.click()
+                await _click_text(page, "Staatsangehörigkeitsangelegenheiten")
                 logger.info("Clicked 'Staatsangehörigkeitsangelegenheiten'")
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(3000)
             except Exception as e:
+                body_text = await page.locator("body").text_content()
+                present = "Staatsangehörigkeitsangelegenheiten" in (body_text or "")
                 logger.error(f"Error clicking Staatsangehörigkeitsangelegenheiten: {e}")
                 await browser.close()
                 return {
                     'available': False,
                     'message': 'Error in first step',
                     'slots': [],
-                    'error': str(e)
+                    'error': f"{e} | text_present={present}"
                 }
             
             # Step 2: Click on "02. Antrag Einbürgerung"
             logger.info("Looking for '02. Antrag Einbürgerung' button...")
             try:
-                antrag_button = page.locator(
-                    "text=02. Antrag Einbürgerung"
-                ).first
-                
-                # Wait up to 10 seconds for button to be visible
-                await antrag_button.wait_for(state="visible", timeout=10000)
-                logger.info("Button found, clicking...")
-                await antrag_button.click()
+                await _click_text(page, "02. Antrag Einbürgerung")
                 logger.info("Clicked '02. Antrag Einbürgerung'")
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(4000)
             except Exception as e:
+                body_text = await page.locator("body").text_content()
+                present = "02. Antrag Einbürgerung" in (body_text or "")
                 logger.error(f"Error clicking Antrag Einbürgerung: {e}")
                 await browser.close()
                 return {
                     'available': False,
                     'message': 'Error in second step',
                     'slots': [],
-                    'error': str(e)
+                    'error': f"{e} | text_present={present}"
                 }
             
             # Step 3: Access the reservation page and check for available appointments
