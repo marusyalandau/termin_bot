@@ -24,7 +24,7 @@ async def _dismiss_cookie_banner(page):
 
 async def _click_text(page, text, timeout=30000):
     await page.wait_for_function(
-        "target => document.body && document.body.innerText.includes(target)",
+        "target => document.body && ((document.body.innerText || '').includes(target) || (document.body.textContent || '').includes(target))",
         arg=text,
         timeout=timeout,
     )
@@ -37,12 +37,13 @@ async def _click_text(page, text, timeout=30000):
         logger.info("Regular click for '%s' failed: %s", text, exc)
 
     clicked = await page.evaluate(
-        """
+        r"""
         target => {
+            const targetLower = target.toLowerCase();
             const elements = Array.from(document.querySelectorAll('*'));
             for (const element of elements) {
                 const content = (element.textContent || '').replace(/\s+/g, ' ').trim();
-                if (!content.includes(target)) {
+                if (!content.toLowerCase().includes(targetLower)) {
                     continue;
                 }
 
@@ -106,7 +107,10 @@ async def check_appointments():
             # Step 1: Click on "Staatsangehörigkeitsangelegenheiten"
             logger.info("Looking for 'Staatsangehörigkeitsangelegenheiten' button...")
             try:
-                await _click_text(page, "Staatsangehörigkeitsangelegenheiten")
+                try:
+                    await _click_text(page, "Staatsangehörigkeitsangelegenheiten")
+                except Exception:
+                    await _click_text(page, "Staatsangehorigkeitsangelegenheiten")
                 logger.info("Clicked 'Staatsangehörigkeitsangelegenheiten'")
                 await page.wait_for_timeout(3000)
             except Exception as e:
