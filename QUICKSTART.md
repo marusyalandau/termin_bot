@@ -81,6 +81,13 @@ sudo systemctl start halle-bot
 sudo systemctl status halle-bot
 ```
 
+**Option C: GitHub Actions schedule (no always-on machine)**
+1. Push this repo to GitHub
+2. Add secrets in repo settings:
+  - `TELEGRAM_BOT_TOKEN`
+  - `TELEGRAM_CHAT_ID`
+3. Enable and run workflow [appointment-check.yml](.github/workflows/appointment-check.yml)
+
 ---
 
 ## Bot Commands

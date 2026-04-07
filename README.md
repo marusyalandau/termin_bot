@@ -77,6 +77,39 @@ playwright install chromium
 python bot.py
 ```
 
+## Run On GitHub Actions (No Always-On Server)
+
+For your use case, this is often the easiest option: run a scheduled check and send one Telegram message per run.
+
+This repository includes:
+- one-shot runner: [run_check_once.py](run_check_once.py)
+- workflow: [.github/workflows/appointment-check.yml](.github/workflows/appointment-check.yml)
+
+### 1. Add repository secrets
+
+In GitHub: Settings -> Secrets and variables -> Actions -> New repository secret
+
+Create:
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+### 2. Enable the workflow
+
+The workflow runs every hour and can also be started manually from the Actions tab.
+
+### 3. Optional behavior
+
+In the workflow file, set:
+- `SEND_NO_APPOINTMENT_MESSAGE: "true"` to send messages for both states
+- `SEND_NO_APPOINTMENT_MESSAGE: "false"` to only notify on available appointments/errors
+
+### 4. Important GitHub Actions notes
+
+- Scheduled workflows are not real-time; delays of a few minutes can happen.
+- Minimum schedule granularity is 5 minutes.
+- Public repos on standard hosted runners are free.
+- Private repos on GitHub Free include limited monthly minutes (currently 2000 minutes).
+
 ## Usage
 
 Once the bot is running, you can interact with it via Telegram:
