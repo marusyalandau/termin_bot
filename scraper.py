@@ -6,8 +6,44 @@ Uses Playwright for handling JavaScript-driven dynamic content
 import asyncio
 from playwright.async_api import async_playwright
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_slot_hints(text: str) -> list[str]:
+    # Collect likely appointment hints shown on the booking page.
+    dates = re.findall(r"\b\d{1,2}\.\d{1,2}\.\d{4}\b", text)
+    times = re.findall(r"\b\d{1,2}:\d{2}\b", text)
+
+    hints = sorted(set(dates + times))
+    return hints[:20]
+
+
+def _has_no_appointments_text(text: str) -> bool:
+    lowered = text.lower()
+    patterns = [
+        "keine freien termine gefunden",
+        "es sind keine termine verfügbar",
+        "es sind keine termine verfugbar",
+        "leider keine termine verfügbar",
+    ]
+    return any(p in lowered for p in patterns)
+
+
+def _has_positive_availability_indicators(text: str) -> bool:
+    lowered = text.lower()
+    positive_patterns = [
+        "uhr",
+        "termin auswählen",
+        "termin auswaehlen",
+        "zeit auswählen",
+        "zeit auswaehlen",
+        "frei",
+        "verfügbar",
+        "verfugbar",
+    ]
+    return any(p in lowered for p in positive_patterns)
 
 
 async def _dismiss_cookie_banner(page):
@@ -173,13 +209,19 @@ async def check_appointments():
             logger.info("Checking for available appointments...")
             try:
                 # Get page content
-                main_content = await page.locator("body").text_content()
+                main_content = await page.locator("body").text_content() or ""
                 logger.info(f"Page content length: {len(main_content)} characters")
-                
-                # Check if the "no appointments" message is present
-                no_appointments_text = "Keine freien Termine gefunden"
-                
-                logger.info(f"Looking for text: '{no_appointments_text}'")
+
+                slot_hints = _extract_slot_hints(main_content)
+                has_no_appointments_text = _has_no_appointments_text(main_content)
+                has_positive_indicators = _has_positive_availability_indicators(main_content)
+
+                logger.info(
+                    "Availability signals: no_appointments=%s positive_indicators=%s slot_hints=%s",
+                    has_no_appointments_text,
+                    has_positive_indicators,
+                    len(slot_hints),
+                )
                 
                 # Save screenshot for debugging
                 try:
@@ -187,8 +229,19 @@ async def check_appointments():
                     logger.debug("Screenshot saved to /tmp/halle_screenshot.png")
                 except:
                     pass
-                
-                if no_appointments_text.lower() in main_content.lower():
+
+                # Prefer positive evidence if both signals exist.
+                if slot_hints or (has_positive_indicators and not has_no_appointments_text):
+                    logger.info("Detected available appointment indicators.")
+                    await browser.close()
+                    return {
+                        'available': True,
+                        'message': 'Appointments may be available!',
+                        'slots': slot_hints or ["Available slots detected"],
+                        'error': None
+                    }
+
+                if has_no_appointments_text:
                     logger.info("✓ Found: 'Keine freien Termine gefunden.' - No appointments available")
                     await browser.close()
                     return {
@@ -197,24 +250,16 @@ async def check_appointments():
                         'slots': [],
                         'error': None
                     }
-                else:
-                    # If the "no appointments" text is NOT found, appointments might be available
-                    logger.info("✗ NOT found: 'Keine freien Termine gefunden.' - Appointments may be available!")
-                    
-                    # Try to extract date patterns to show available slots
-                    import re
-                    dates = re.findall(r'\d{1,2}\.\d{1,2}\.\d{4}', main_content)
-                    available_slots = list(set(dates)) if dates else ["Available slots detected"]
-                    
-                    logger.info(f"Found slots: {available_slots}")
-                    
-                    await browser.close()
-                    return {
-                        'available': True,
-                        'message': f'Appointments may be available!',
-                        'slots': available_slots,
-                        'error': None
-                    }
+                logger.warning(
+                    "No explicit no-appointment text and no positive slot indicators found; returning unknown/no slots."
+                )
+                await browser.close()
+                return {
+                    'available': False,
+                    'message': 'Could not confirm available appointments',
+                    'slots': [],
+                    'error': None
+                }
                     
             except Exception as e:
                 logger.error(f"Error checking appointments: {e}")
