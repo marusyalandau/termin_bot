@@ -1,6 +1,8 @@
-# Halle Einbuergerungsbehoerde Appointment Bot
+# City X Appointment Bot
 
-This project supports two ways to monitor appointments for "Staatsangehoerigkeitsangelegenheiten" in Halle:
+A friend asked me to build a bot to monitor appointment slots for citizenship applications in her city. She became worried that the city name and direct links could make the bot easier to discover and increase competition for limited slots, so I anonymized it in a later commit to make it less obvious at first glance.
+
+This project supports two ways to monitor appointments in City X:
 
 - `bot.py`: a long-running Telegram bot with commands and periodic checks
 - `run_check_once.py`: a one-shot checker designed to be launched by `cron`
@@ -32,8 +34,8 @@ Important:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/marusyalandau/halle_bot.git
-cd halle_bot
+git clone https://github.com/marusyalandau/termin_bot.git
+cd termin_bot
 ```
 
 ### 2. Install dependencies
@@ -56,6 +58,9 @@ Example:
 ```dotenv
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
+BOT_LABEL=City X Appointment Bot
+APPOINTMENT_LINK=https://example.com/appointments
+BOOKING_URL=https://your-booking-provider.example/calendar
 SEND_NO_APPOINTMENT_MESSAGE=false
 CHECK_INTERVAL=300
 ```
@@ -64,6 +69,9 @@ Meaning:
 
 - `TELEGRAM_BOT_TOKEN`: required in both modes
 - `TELEGRAM_CHAT_ID`: required in both modes
+- `BOT_LABEL`: display name used in Telegram messages
+- `APPOINTMENT_LINK`: link shown in notifications
+- `BOOKING_URL`: actual page that Playwright opens for checks
 - `SEND_NO_APPOINTMENT_MESSAGE`: used only by `run_check_once.py`; set it to `false` to notify only when appointments are available
 - `CHECK_INTERVAL`: used only by `bot.py`
 
@@ -117,7 +125,7 @@ Use this mode if you want scheduled checks without running a long-lived polling 
 Example `crontab` entry for every 5 minutes:
 
 ```bash
-*/5 * * * * cd /home/ubuntu/halle_bot && /home/ubuntu/halle_bot/venv/bin/python /home/ubuntu/halle_bot/run_check_once.py >> /home/ubuntu/halle_bot/cron.log 2>&1
+*/5 * * * * cd /home/ubuntu/termin_bot && /home/ubuntu/termin_bot/venv/bin/python /home/ubuntu/termin_bot/run_check_once.py >> /home/ubuntu/termin_bot/cron.log 2>&1
 ```
 
 Notes:
@@ -163,7 +171,7 @@ Set the schedule in `crontab`, for example:
 After you push changes to git, the usual update flow on the server is:
 
 ```bash
-cd /home/ubuntu/halle_bot
+cd /home/ubuntu/termin_bot
 git pull
 ```
 
@@ -189,7 +197,7 @@ Then:
 ### Cron job not sending messages
 
 - Check `crontab -l`
-- Check the log file with `tail -n 50 /home/ubuntu/halle_bot/cron.log`
+- Check the log file with `tail -n 50 /home/ubuntu/termin_bot/cron.log`
 - Run `python run_check_once.py` manually once
 
 ### Playwright issues
@@ -203,7 +211,7 @@ Then:
 ## Project Structure
 
 ```text
-halle_bot/
+termin_bot/
 ├── bot.py
 ├── run_check_once.py
 ├── scraper.py

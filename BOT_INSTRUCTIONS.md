@@ -9,7 +9,7 @@ Important:
 - For automatic checks, choose one mode: `bot.py` or `cron` + `run_check_once.py`
 - Automatic notifications are sent only when appointments are available, unless you explicitly enable no-appointment messages in `run_check_once.py`
 
-Here are all the commands you can use with the Halle Appointment Bot:
+Here are all the commands you can use with the City X Appointment Bot:
 
 ### `/start`
 Shows welcome message and all available commands. Start here if you need help!
@@ -63,6 +63,12 @@ The bot will:
 ---
 
 ## Configuration
+
+You can keep public docs generic and use real links only in your private `.env`:
+
+- `BOT_LABEL=City X Appointment Bot`
+- `APPOINTMENT_LINK=https://example.com/appointments` (shown in Telegram messages)
+- `BOOKING_URL=https://your-booking-provider.example/calendar` (used by scraper)
 
 The bot's check interval can be customized:
 
@@ -122,7 +128,7 @@ Slots:
   • 16.04.2026
   • 17.04.2026
 
-🔗 Check here: https://halle.de/serviceportal/...
+🔗 Check here: https://example.com/appointments
 ```
 
 ### When No Appointments Are Available

@@ -4,11 +4,12 @@ Advanced debugging script - shows exactly what's on the page
 """
 
 import asyncio
+import os
 from playwright.async_api import async_playwright
 
 async def debug():
-    # Direct URL to the appointment booking system (from iframe)
-    url = "https://itc-halle.saas.smartcjm.com/m/standesamt/extern/calendar/?uid=9da900ff-e9a5-46be-a622-ecdfa078121c"
+    # Booking URL from environment to keep the script generic.
+    url = os.getenv("BOOKING_URL", "https://example.com/appointments")
     
     print("=" * 70)
     print("🔧 DEBUGGING: What's on the page?")

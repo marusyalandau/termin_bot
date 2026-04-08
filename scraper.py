@@ -1,12 +1,13 @@
-"""
-Scraper for Halle Einbürgerungsbehörde appointment availability
-Uses Playwright for handling JavaScript-driven dynamic content
+"""Scraper for City X appointment availability.
+
+Uses Playwright for handling JavaScript-driven dynamic content.
 """
 
 import asyncio
 from playwright.async_api import async_playwright
 import logging
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ async def _has_text(page, text):
 
 async def check_appointments():
     """
-    Check for available appointments on the Halle website.
+    Check for available appointments on the configured booking website.
     
     Returns:
         dict: {
@@ -121,8 +122,10 @@ async def check_appointments():
             'error': str (if error occurred)
         }
     """
-    # Direct URL to the appointment booking system (extracted from iframe)
-    url = "https://itc-halle.saas.smartcjm.com/m/standesamt/extern/calendar/?uid=9da900ff-e9a5-46be-a622-ecdfa078121c"
+    # Booking URL is configurable via .env to avoid hardcoded public links.
+    url = os.getenv(
+        "BOOKING_URL",
+    )
     
     try:
         async with async_playwright() as p:
@@ -225,8 +228,8 @@ async def check_appointments():
                 
                 # Save screenshot for debugging
                 try:
-                    await page.screenshot(path="/tmp/halle_screenshot.png")
-                    logger.debug("Screenshot saved to /tmp/halle_screenshot.png")
+                    await page.screenshot(path="/tmp/termin_bot_screenshot.png")
+                    logger.debug("Screenshot saved to /tmp/termin_bot_screenshot.png")
                 except:
                     pass
 

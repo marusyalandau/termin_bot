@@ -4,7 +4,7 @@ Test script for the appointment scraper
 Run this to test if the scraper is working correctly without the full bot
 
 This script will:
-1. Navigate to the Halle website
+1. Navigate to the configured booking website
 2. Click through the required buttons
 3. Look for the text "Keine freien Termine gefunden."
 4. Report the results
@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 
 async def main():
     print("=" * 70)
-    print("🔍 HALLE APPOINTMENT SCRAPER - TEST MODE")
+    print("🔍 CITY X APPOINTMENT SCRAPER - TEST MODE")
     print("=" * 70)
     print()
     print("What this test does:")
-    print("  1. Opens the direct booking URL (bypasses main halle.de page)")
+    print("  1. Opens BOOKING_URL from .env")
     print("  2. Clicks 'Staatsangehörigkeitsangelegenheiten'")
     print("  3. Clicks '02. Antrag Einbürgerung'")
     print("  4. Checks for the text: 'Keine freien Termine gefunden.'")
@@ -74,7 +74,7 @@ async def main():
         if result['available']:
             print("🎉 APPOINTMENTS FOUND!")
             print("   The scraper successfully navigated and found available slots.")
-            print("   ➜ Visit the website to book: https://halle.de/serviceportal/...")
+            print("   ➜ Visit the appointment link configured in your .env")
         else:
             print("😴 No appointments available at this moment.")
             print("   The scraper successfully navigated but found:")
@@ -97,7 +97,7 @@ async def main():
         print()
         print("Troubleshooting:")
         print("  • Check internet connection")
-        print("  • Website might be down: https://halle.de/")
+        print("  • Website might be down or BOOKING_URL is wrong")
         print("  • Website structure might have changed")
         print("  • Playwright browsers not installed: playwright install chromium")
         print("=" * 70)

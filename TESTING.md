@@ -7,8 +7,8 @@ You don't need Telegram to test the scraper! Follow these steps:
 ### 1. Install dependencies
 
 ```bash
-git clone https://github.com/marusyalandau/halle_bot.git
-cd halle_bot
+git clone https://github.com/marusyalandau/termin_bot.git
+cd termin_bot
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -115,7 +115,7 @@ playwright install chromium
 
 ### Error: Connection refused / Website not loading
 - Check internet connection
-- Website might be down: https://halle.de/
+- Website might be down or `BOOKING_URL` is wrong
 - Try again in a few minutes
 
 ### Error: Cloudflare block detected
@@ -139,7 +139,7 @@ playwright install chromium
 
 2. **If test_scraper.py fails** ✗
    - Run `python debug_scraper.py`
-   - Check the screenshot at `/tmp/halle_debug_screenshot.png`
+  - Check the screenshot at `/tmp/termin_bot_debug_screenshot.png`
    - Look at the page content output
    - Update the button names in `scraper.py` if needed
 

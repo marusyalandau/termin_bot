@@ -14,6 +14,7 @@ This will:
 """
 
 import asyncio
+import os
 from playwright.async_api import async_playwright
 import logging
 
@@ -27,10 +28,10 @@ async def debug_scraper():
     """
     Debug version of the scraper with more verbose output
     """
-    url = "https://halle.de/serviceportal/online-terminvergabe/online-terminvereinbarung-einbuergerungsbehoerde-standesamt"
+    url = os.getenv("BOOKING_URL", "https://example.com/appointments")
     
     print("=" * 70)
-    print("🔧 HALLE SCRAPER - DEBUG MODE")
+    print("🔧 CITY X SCRAPER - DEBUG MODE")
     print("=" * 70)
     print()
     
@@ -107,7 +108,7 @@ async def debug_scraper():
             
             # Save screenshot
             print("📸 Saving screenshot...")
-            screenshot_path = "/tmp/halle_debug_screenshot.png"
+            screenshot_path = "/tmp/termin_bot_debug_screenshot.png"
             await page.screenshot(path=screenshot_path)
             print(f"  ✓ Screenshot saved to: {screenshot_path}")
             print()
@@ -134,7 +135,7 @@ async def debug_scraper():
         print()
         print("Common issues:")
         print("  1. Internet connection down")
-        print("  2. Website is down: https://halle.de/")
+        print("  2. Website is down or BOOKING_URL is unreachable")
         print("  3. Playwright not installed: playwright install chromium")
         print("  4. Website structure changed - button names might be different")
 

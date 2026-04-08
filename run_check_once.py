@@ -29,11 +29,13 @@ def _truthy(value: str | None, default: bool = False) -> bool:
 
 def build_message(result: dict) -> str:
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    bot_label = os.getenv("BOT_LABEL", "City X Termincheck")
+    appointment_link = os.getenv("APPOINTMENT_LINK", "https://example.com/appointments")
 
     if result.get("cloudflare_blocked"):
         ip = result.get("blocked_ip", "unbekannt")
         return (
-            "🚫 Halle Termincheck - Cloudflare blockiert\n"
+            f"🚫 {bot_label} - Cloudflare blockiert\n"
             f"Zeit: {now_utc}\n"
             f"IP: {ip}\n"
             "Status: Diese IP wurde von Cloudflare geblockt.\n"
@@ -42,7 +44,7 @@ def build_message(result: dict) -> str:
 
     if result.get("error"):
         return (
-            "❌ Halle Termincheck Fehler\n"
+            f"❌ {bot_label} Fehler\n"
             f"Zeit: {now_utc}\n"
             f"Fehler: {result['error']}"
         )
@@ -50,20 +52,18 @@ def build_message(result: dict) -> str:
     if result.get("available"):
         slots = result.get("slots") or []
         lines = [
-            "✅ Halle Termincheck",
+            f"✅ {bot_label}",
             f"Zeit: {now_utc}",
             "Status: Termine moeglich verfuegbar!",
         ]
         if slots:
             lines.append("Gefundene Hinweise:")
             lines.extend([f"- {slot}" for slot in slots])
-        lines.append(
-            "Link: https://halle.de/serviceportal/online-terminvergabe/online-terminvereinbarung-einbuergerungsbehoerde-standesamt"
-        )
+        lines.append(f"Link: {appointment_link}")
         return "\n".join(lines)
 
     return (
-        "ℹ️ Halle Termincheck\n"
+        f"ℹ️ {bot_label}\n"
         f"Zeit: {now_utc}\n"
         "Status: Keine freien Termine gefunden."
     )

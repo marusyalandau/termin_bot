@@ -1,9 +1,9 @@
-# Quick setup script for Halle Appointment Bot
+# Quick setup script for City X appointment bot
 
 set -e
 
 echo "======================================================"
-echo "🤖 Halle Appointment Bot - Setup"
+echo "🤖 City X Appointment Bot - Setup"
 echo "======================================================"
 echo
 

@@ -1,6 +1,4 @@
-"""
-Telegram bot for checking Halle Einbürgerungsbehörde appointments
-"""
+"""Telegram bot for checking City X appointments."""
 
 import os
 import logging
@@ -25,6 +23,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "3600"))  # Default: 1 hour
+BOT_LABEL = os.getenv("BOT_LABEL", "City X Appointment Bot")
+APPOINTMENT_LINK = os.getenv("APPOINTMENT_LINK")
 
 # Dictionary to track if user has already been notified (to avoid spam)
 notified_state = {"last_available": False}
@@ -32,16 +32,15 @@ notified_state = {"last_available": False}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start command handler"""
-    message = """
-🤖 Halle Einbürgerungsbehörde Appointment Bot
+    message = f"""
+🤖 {BOT_LABEL}
 
 Available commands:
 /start - Show this message
 /check - Check appointments now
 /status - Show bot status
 
-This bot checks for available appointment slots for 'Staatsangehörigkeitsangelegenheiten' 
-and notifies you when slots become available.
+This bot checks for available appointment slots and notifies you when slots become available.
     """
     await update.message.reply_text(message)
 
@@ -93,7 +92,7 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
         message = f"✅ AVAILABLE! {result['message']}\n\nSlots:\n"
         for slot in result['slots']:
             message += f"  • {slot}\n"
-        message += f"\n🔗 Check here: https://halle.de/serviceportal/online-terminvergabe/online-terminvereinbarung-einbuergerungsbehoerde-standesamt"
+        message += f"\n🔗 Check here: {APPOINTMENT_LINK}"
         notified_state['last_available'] = True
 
         if CHAT_ID:
@@ -133,7 +132,7 @@ async def main() -> None:
     )
     
     # Start the bot
-    logger.info("Starting Halle Appointment Bot...")
+    logger.info("Starting %s...", BOT_LABEL)
     logger.info(f"Check interval: {CHECK_INTERVAL} seconds")
     logger.info("Periodic notifications are sent only when appointments are available.")
     
