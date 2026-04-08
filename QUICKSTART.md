@@ -2,17 +2,22 @@
 
 ## What's Been Created
 
-✅ **bot.py** - Main Telegram bot that:
-  - Receives commands (/check, /status, /start)
-  - Periodically checks for appointments (every 1 hour by default)
-  - Sends Telegram notifications when appointments are found
+✅ **bot.py** - Long-running Telegram bot that:
+  - Receives commands (`/check`, `/status`, `/start`)
+  - Periodically checks for appointments
+  - Uses `CHECK_INTERVAL` from `.env`
 
 ✅ **scraper.py** - Website scraper that:
   - Uses Playwright headless browser to handle JavaScript
-  - Automatically clicks "Staatsangehörigkeitsangelegenheiten"
-  - Automatically clicks "02. Antrag Einbürgerung"
+  - Automatically clicks "Staatsangehoerigkeitsangelegenheiten"
+  - Automatically clicks "02. Antrag Einbuergerung"
   - Extracts available appointment slots
   - Handles errors gracefully
+
+✅ **run_check_once.py** - One-shot runner that:
+  - Checks appointments one time
+  - Sends one Telegram message
+  - Is designed for `cron`
 
 ✅ **requirements.txt** - All Python dependencies
 
@@ -56,6 +61,7 @@ Add:
 ```
 TELEGRAM_BOT_TOKEN=your_token
 TELEGRAM_CHAT_ID=your_chat_id
+SEND_NO_APPOINTMENT_MESSAGE=false
 ```
 
 ### 4. Test it (optional)
@@ -64,13 +70,21 @@ source venv/bin/activate
 python test_scraper.py
 ```
 
-### 5. Start the bot (Choose one):
+### 5. Start it (choose one mode)
 
-**Option A: Run directly**
+Important:
+
+- `bot.py` and `run_check_once.py` are two different operating modes for the same bot
+- Telegram commands work only when `bot.py` is running
+- For automatic checks, run only one mode at a time to avoid duplicate notifications
+
+**Option A: Long-running bot with commands**
 ```bash
 source venv/bin/activate
 python bot.py
 ```
+
+In this mode, automatic notifications are sent only when appointments are available. Manual `/check` always replies.
 
 **Option B: Run as system service (recommended for 24/7)**
 ```bash
@@ -81,23 +95,33 @@ sudo systemctl start halle-bot
 sudo systemctl status halle-bot
 ```
 
-**Option C: GitHub Actions schedule (no always-on machine)**
-1. Push this repo to GitHub
-2. Add secrets in repo settings:
-  - `TELEGRAM_BOT_TOKEN`
-  - `TELEGRAM_CHAT_ID`
-3. Enable and run workflow [appointment-check.yml](.github/workflows/appointment-check.yml)
+**Option C: Cron + one-shot runner**
+```bash
+crontab -e
+```
+
+Add this line for every 5 minutes:
+
+```bash
+*/5 * * * * cd /home/ubuntu/halle_bot && /home/ubuntu/halle_bot/venv/bin/python /home/ubuntu/halle_bot/run_check_once.py >> /home/ubuntu/halle_bot/cron.log 2>&1
+```
+
+Then check:
+
+```bash
+crontab -l
+tail -n 50 /home/ubuntu/halle_bot/cron.log
+```
 
 ---
 
 ## Bot Commands
 
-Once running, message your bot on Telegram:
+These commands work only in `bot.py` mode:
 
 - `/start` - Show help
 - `/check` - Check appointments now
 - `/status` - Show bot status
-- `/stop` - Stop the bot
 
 ---
 
@@ -107,7 +131,11 @@ Once running, message your bot on Telegram:
 2. **Clicks buttons automatically** → "Staatsangehörigkeitsangelegenheiten" then "02. Antrag Einbürgerung"
 3. **Extracts appointment data** → Looks for available time slots
 4. **Sends Telegram notification** → Alerts you when appointments found
-5. **Repeats** → Checks every 3600 seconds (1 hour) by default
+5. **Repeats** → In `bot.py` mode, checks every `CHECK_INTERVAL` seconds
+
+In `run_check_once.py` mode, the schedule comes from `cron` instead.
+
+Do not run both automatic modes at the same time unless you want duplicate checks.
 
 ---
 
@@ -117,6 +145,16 @@ Once running, message your bot on Telegram:
 Edit `.env`:
 ```
 CHECK_INTERVAL=1800  # Check every 30 minutes instead of 1 hour
+```
+
+This affects `bot.py` only.
+
+### Change cron frequency
+
+Edit `crontab -e` and change the schedule expression, for example:
+
+```bash
+*/10 * * * * cd /home/ubuntu/halle_bot && /home/ubuntu/halle_bot/venv/bin/python /home/ubuntu/halle_bot/run_check_once.py >> /home/ubuntu/halle_bot/cron.log 2>&1
 ```
 
 ### Run as system service (Linux)
@@ -134,12 +172,21 @@ sudo journalctl -u halle-bot -f
 
 ## Troubleshooting
 
-**Bot not responding?**
+**Bot not responding to `/start` or `/check`?**
 - Check `.env` exists with correct tokens
+- Make sure you started `python bot.py`
 - Test token: `curl https://api.telegram.org/bot<TOKEN>/getMe`
 
 **Playwright errors?**
 - Reinstall: `playwright install chromium`
+
+**Cron mode sends messages only to one chat?**
+- That is expected. `run_check_once.py` sends one message to the configured `TELEGRAM_CHAT_ID`.
+- Use a group chat ID if multiple people should receive the same notification.
+
+**Cron mode sends nothing when there are no appointments?**
+- That is the default behavior when `SEND_NO_APPOINTMENT_MESSAGE=false`.
+- Set it to `true` if you want a message for every run.
 
 **Not finding appointments?**
 - Run: `python test_scraper.py` to debug
@@ -151,9 +198,11 @@ sudo journalctl -u halle-bot -f
 
 1. Configure `.env` with your Telegram credentials
 2. Test with `python test_scraper.py`
-3. Start the bot with `python bot.py` or use systemd
-4. Send `/check` command to your bot on Telegram
-5. Wait for appointments! The bot checks automatically
+3. Choose a run mode:
+  - `python bot.py` or systemd for interactive bot commands
+  - `cron` + `run_check_once.py` for one-shot scheduled messages
+4. If using `bot.py`, send `/check` in Telegram
+5. If using `cron`, wait for the next scheduled run or run `python run_check_once.py` manually
 
 ## Viewing Logs (if using systemd)
 ```bash
@@ -164,4 +213,4 @@ sudo journalctl -u halle-bot -f
 sudo journalctl -u halle-bot -n 50
 ```
 
-Good luck getting your appointment! 🍀
+Good luck getting your appointment.

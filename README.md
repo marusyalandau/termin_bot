@@ -1,30 +1,31 @@
-# 🤖 Halle Einbürgerungsbehörde Appointment Bot
+# Halle Einbuergerungsbehoerde Appointment Bot
 
-A Telegram bot that automatically checks for available appointments for "Staatsangehörigkeitsangelegenheiten" (citizenship affairs) at the Halle administration website and notifies you when slots become available.
+This project supports two ways to monitor appointments for "Staatsangehoerigkeitsangelegenheiten" in Halle:
+
+- `bot.py`: a long-running Telegram bot with commands and periodic checks
+- `run_check_once.py`: a one-shot checker designed to be launched by `cron`
+
+Both modes use the same scraper in `scraper.py`.
+
+Important:
+
+- Telegram commands work only while `bot.py` is running
+- For automatic checks, choose one mode: either `bot.py` or `cron` + `run_check_once.py`
+- Running both automatic modes at the same time will cause duplicate checks and possibly duplicate notifications
 
 ## Features
 
-- ✅ Automated checking for available appointments
-- 🔔 Telegram notifications when appointments are available
-- ⏰ Configurable check interval
-- 🌐 Handles JavaScript-rendered dynamic content
-- 🛡️ Error handling and logging
-
-## Problem Solved
-
-The Halle website (https://halle.de/serviceportal/online-terminvergabe/online-terminvereinbarung-einbuergerungsbehoerde-standesamt) uses JavaScript to dynamically load appointment availability. Users must:
-
-1. Click "Staatsangehörigkeitsangelegenheiten"
-2. Click "02. Antrag Einbürgerung"
-3. Navigate to the reservation page
-
-All without the URL changing. This bot automates this process using **Playwright** (headless browser automation) and checks for available slots periodically.
+- Automated appointment checks with Playwright
+- Telegram notifications
+- Works with a personal chat ID or a group chat ID
+- Cloudflare block detection in one-shot mode
+- Two supported run modes for different deployment styles
 
 ## Prerequisites
 
 - Python 3.8+
-- A Telegram Bot Token (from @BotFather on Telegram)
-- Your Telegram Chat ID
+- A Telegram bot token from @BotFather
+- A Telegram chat ID or group chat ID
 
 ## Setup
 
@@ -35,174 +36,179 @@ git clone https://github.com/marusyalandau/halle_bot.git
 cd halle_bot
 ```
 
-### 2. Create your `.env` file
+### 2. Install dependencies
 
-Copy `.env.example` to `.env` and fill in your credentials:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3. Create `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-```
+Example:
+
+```dotenv
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
-CHECK_INTERVAL=3600
+SEND_NO_APPOINTMENT_MESSAGE=false
+CHECK_INTERVAL=300
 ```
 
-### Getting Telegram Credentials
+Meaning:
 
-**Bot Token:**
-- Contact @BotFather on Telegram
-- Create a new bot with `/newbot`
-- Copy the token provided
+- `TELEGRAM_BOT_TOKEN`: required in both modes
+- `TELEGRAM_CHAT_ID`: required in both modes
+- `SEND_NO_APPOINTMENT_MESSAGE`: used only by `run_check_once.py`; set it to `false` to notify only when appointments are available
+- `CHECK_INTERVAL`: used only by `bot.py`
 
-**Chat ID:**
-- Send a message to your bot
-- Visit: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-- Find your chat_id in the response
+### 4. Get Telegram credentials
 
-### 3. Install dependencies
+**Bot token**
+
+- Create the bot via @BotFather with `/newbot`
+
+**Chat ID**
+
+- Send a message to the bot or to the target group
+- Open `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+- Find `chat.id` in the response
+- Group chat IDs are usually negative, for example `-1001234567890`
+
+## Mode 1: `bot.py`
+
+Run:
 
 ```bash
-pip install -r requirements.txt
-
-# Install Playwright browsers
-playwright install chromium
-```
-
-### 4. Run the bot
-
-```bash
+source venv/bin/activate
 python bot.py
 ```
 
-## Run On GitHub Actions (No Always-On Server)
+Use this mode if you want interactive Telegram commands.
 
-For your use case, this is often the easiest option: run a scheduled check and send one Telegram message per run.
+Available commands:
 
-This repository includes:
-- one-shot runner: [run_check_once.py](run_check_once.py)
-- workflow: [.github/workflows/appointment-check.yml](.github/workflows/appointment-check.yml)
+- `/start`
+- `/check`
+- `/status`
 
-### 1. Add repository secrets
+This mode uses `CHECK_INTERVAL` from `.env`.
 
-In GitHub: Settings -> Secrets and variables -> Actions -> New repository secret
+If `bot.py` is not running, `/start`, `/check`, and `/status` will not work.
 
-Create:
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+Background notifications in this mode are sent only when appointments are available. Manual `/check` still always replies with the current result.
 
-### 2. Enable the workflow
+## Mode 2: `run_check_once.py` with cron
 
-The workflow runs every 20 minutes and can also be started manually from the Actions tab.
+Run once manually:
 
-### 3. Optional behavior
+```bash
+source venv/bin/activate
+python run_check_once.py
+```
 
-In the workflow file, set:
-- `SEND_NO_APPOINTMENT_MESSAGE: "true"` to send messages for both states
-- `SEND_NO_APPOINTMENT_MESSAGE: "false"` to only notify on available appointments/errors
+Use this mode if you want scheduled checks without running a long-lived polling bot.
 
-### 4. Important GitHub Actions notes
+Example `crontab` entry for every 5 minutes:
 
-- Scheduled workflows are not real-time; delays of a few minutes can happen.
-- Minimum schedule granularity is 5 minutes.
-- Public repos on standard hosted runners are free.
-- Private repos on GitHub Free include limited monthly minutes (currently 2000 minutes).
+```bash
+*/5 * * * * cd /home/ubuntu/halle_bot && /home/ubuntu/halle_bot/venv/bin/python /home/ubuntu/halle_bot/run_check_once.py >> /home/ubuntu/halle_bot/cron.log 2>&1
+```
 
-## Usage
+Notes:
 
-Once the bot is running, you can interact with it via Telegram:
+- `run_check_once.py` sends one message and exits
+- It does not reply to `/start` or other Telegram commands
+- The schedule is controlled only by `cron`
+- Do not use this together with the periodic checking inside `bot.py` unless you explicitly want duplicate checks
 
-- `/start` - Show welcome message and available commands
-- `/check` - Check for appointments immediately
-- `/status` - Show bot status and last check time
-- `/stop` - Stop the bot
+`SEND_NO_APPOINTMENT_MESSAGE` behavior:
 
-The bot will automatically check for appointments every `CHECK_INTERVAL` seconds (default: 20 minutes).
+- `true`: send a message for both states
+- `false`: send a message only when appointments are available
 
 ## How It Works
 
-1. **Playwright Browser**: Opens a headless Chromium browser
-2. **Navigation**: Automatically clicks through the required buttons:
-   - "Staatsangehörigkeitsangelegenheiten"
-   - "02. Antrag Einbürgerung"
-3. **Scraping**: Looks for available appointment slots
-4. **Notification**: Sends a Telegram message if appointments are found
+1. Open the booking system in a headless browser
+2. Click through the required service selection
+3. Detect whether "Keine freien Termine gefunden" is present
+4. Send the result to Telegram
 
 ## Configuration
 
-Edit the `CHECK_INTERVAL` in `.env` to adjust how often the bot checks:
+### `bot.py` frequency
 
-- `3600` = 1 hour (default)
+Set `CHECK_INTERVAL` in `.env`:
+
+- `3600` = 1 hour
 - `1800` = 30 minutes
 - `600` = 10 minutes
 - `300` = 5 minutes
 
-⚠️ **Note**: Don't set it too low to avoid overloading the server.
+### `run_check_once.py` frequency
+
+Set the schedule in `crontab`, for example:
+
+- `*/5 * * * *` = every 5 minutes
+- `*/10 * * * *` = every 10 minutes
+- `*/20 * * * *` = every 20 minutes
+
+## Oracle / VPS deployment
+
+After you push changes to git, the usual update flow on the server is:
+
+```bash
+cd /home/ubuntu/halle_bot
+git pull
+```
+
+Then:
+
+- if you use `bot.py`, restart the running process or systemd service
+- if you use `cron` with `run_check_once.py`, `git pull` is enough unless you changed the cron command itself
 
 ## Troubleshooting
 
-### Bot not responding
+### `bot.py` does not answer commands
 
-- Check that `.env` file exists and has correct tokens
-- Verify the bot token is valid with: 
-  ```bash
-  curl https://api.telegram.org/bot<TOKEN>/getMe
-  ```
+- Make sure `python bot.py` is actually running
+- Verify the token with `curl https://api.telegram.org/bot<TOKEN>/getMe`
+- Check that `.env` contains the correct token
+
+### `run_check_once.py` sends messages only to one person
+
+- That is expected
+- It sends only to `TELEGRAM_CHAT_ID`
+- Use a group chat ID if multiple people should receive the same message
+
+### Cron job not sending messages
+
+- Check `crontab -l`
+- Check the log file with `tail -n 50 /home/ubuntu/halle_bot/cron.log`
+- Run `python run_check_once.py` manually once
 
 ### Playwright issues
 
-- Reinstall browsers: `playwright install chromium`
-- Check Chrome/Chromium is installed
+- Reinstall browsers with `playwright install chromium`
 
-### Website structure changed
+### Website flow changed
 
-If the website layout changes:
-1. Edit `scraper.py`
-2. Update the button selectors in the `check_appointments()` function
-3. Adjust appointment slot detection logic
+- Update selectors or text checks in `scraper.py`
 
-### Debugging
+## Project Structure
 
-Enable verbose logging by modifying the logging level in `bot.py`:
-
-```python
-logging.basicConfig(level=logging.DEBUG)  # Change INFO to DEBUG
-```
-
-## Architecture
-
-```
+```text
 halle_bot/
-├── bot.py           # Main Telegram bot with periodic checking
-├── scraper.py       # Website scraper using Playwright
-├── requirements.txt # Python dependencies
-├── .env.example    # Example environment variables
-└── README.md       # This file
+├── bot.py
+├── run_check_once.py
+├── scraper.py
+├── .env.example
+├── QUICKSTART.md
+├── TESTING.md
+└── BOT_INSTRUCTIONS.md
 ```
-
-## Notes
-
-- The bot runs continuously. To stop it, use Ctrl+C or the `/stop` command
-- The bot stores state in memory; data is lost on restart
-- Consider running it on a server or VPS for 24/7 operation
-
-## Future Improvements
-
-- [ ] Database to track appointment history
-- [ ] Webhook instead of polling for real-time updates
-- [ ] Multiple languages support
-- [ ] Appointment confirmation automation
-- [ ] Web dashboard for checking status
-
-## License
-
-MIT
-
-## Support
-
-If the bot doesn't work or the website structure changes, check:
-1. Website URL is still: https://halle.de/serviceportal/online-terminvergabe/online-terminvereinbarung-einbuergerungsbehoerde-standesamt
-2. Button text matches: "Staatsangehörigkeitsangelegenheiten" and "02. Antrag Einbürgerung"
-3. Update selectors in `scraper.py` if website layout changed

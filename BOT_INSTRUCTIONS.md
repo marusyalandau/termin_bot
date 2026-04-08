@@ -1,6 +1,13 @@
-# 🤖 Telegram Bot Instructions
+# Telegram Bot Instructions
 
 ## Commands
+
+Important:
+
+- `/start`, `/check`, and `/status` work only when `bot.py` is currently running
+- If only `run_check_once.py` is scheduled with `cron`, the bot will send notifications but will not answer commands
+- For automatic checks, choose one mode: `bot.py` or `cron` + `run_check_once.py`
+- Automatic notifications are sent only when appointments are available, unless you explicitly enable no-appointment messages in `run_check_once.py`
 
 Here are all the commands you can use with the Halle Appointment Bot:
 
@@ -23,14 +30,11 @@ Shows the current bot status including:
 
 Use this to verify the bot is running.
 
-### `/stop`
-Stops the bot. Run this if you want to pause the bot temporarily.
-
 ---
 
-## ⏰ Automatic Checks
+## Automatic Checks
 
-The bot automatically checks for appointments every **1 hour** by default (this can be changed).
+The bot automatically checks for appointments every **1 hour** by default in `bot.py` mode. This can be changed with `CHECK_INTERVAL` in `.env`.
 
 ### How You'll Be Notified
 
@@ -48,17 +52,17 @@ The bot will:
 
 ---
 
-## 🎯 Usage Tips
+## Usage Tips
 
 1. **First Run**: Send `/start` to see this help
 2. **Manual Check**: Send `/check` to see results immediately
-3. **Let It Run**: The bot checks automatically every hour
+3. **Let It Run**: The bot checks automatically based on `CHECK_INTERVAL`
 4. **Keep Your Chat Open**: Notifications will come to this chat
 5. **When Found**: Click the link in the notification to book immediately
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 The bot's check interval can be customized:
 
@@ -70,14 +74,28 @@ The bot's check interval can be customized:
 | 3600 | Every 1 hour (default) |
 | 7200 | Every 2 hours |
 
-> Note: Don't set it too low (less than 5 minutes) to avoid server overload.
+Note: Don't set it too low (less than 5 minutes) to avoid server overload.
 
 ---
 
-## ❓ FAQ
+## Cron Mode
+
+If you use `run_check_once.py` with `cron`, the bot does not listen for Telegram commands.
+
+In this mode:
+- `CHECK_INTERVAL` is ignored
+- `cron` decides how often checks run
+- one result message is sent to `TELEGRAM_CHAT_ID`
+- using a group chat ID sends the same message to the whole group
+- do not run this together with periodic checks in `bot.py` unless you want duplicate checks and duplicate notifications
+- by default, `run_check_once.py` stays silent when there are no appointments
+
+---
+
+## FAQ
 
 **Q: Will the bot spam me?**
-A: No! It only sends you a message when appointments are found or when they become unavailable.
+A: No. Automatic checks are silent when there are no appointments. Manual `/check` still replies with the current result.
 
 **Q: How long does a check take?**
 A: 30-60 seconds. The bot opens a browser, navigates through the website, and checks for slots.
@@ -89,11 +107,11 @@ A: Yes! Edit the `CHECK_INTERVAL` in the bot's .env file and restart.
 A: The bot will report an error. Contact the bot administrator to update the selectors.
 
 **Q: Can multiple people use the same bot?**
-A: Yes! Share the bot's Telegram name (@your_bot_name) and add your chat IDs to send notifications.
+A: In `bot.py` mode, multiple people can use commands if the bot is running. In `run_check_once.py` mode, notifications go only to the configured `TELEGRAM_CHAT_ID`, so use a group chat if multiple people should receive them.
 
 ---
 
-## 🔔 Example Messages
+## Example Messages
 
 ### When Appointments Are Found
 ```
@@ -112,6 +130,8 @@ Slots:
 ❌ No appointments currently available
 ```
 
+This kind of message is returned by manual `/check`. Automatic background checks stay silent by default.
+
 ### Status Check
 ```
 📊 Bot Status
@@ -125,12 +145,16 @@ The bot will automatically check for appointments every 60 minutes.
 
 ---
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 **Bot not responding to commands?**
 - Make sure you sent the message to the correct bot
-- Restart the bot
+- Make sure `bot.py` is actually running
 - Check that the Telegram token is valid
+
+**Cron is running but `/start` does nothing?**
+- That is expected when only `run_check_once.py` is scheduled with cron
+- Start `bot.py` if you want Telegram commands
 
 **Getting repeated error messages?**
 - The website structure might have changed
@@ -143,14 +167,13 @@ The bot will automatically check for appointments every 60 minutes.
 
 ---
 
-## 📱 Quick Reference
+## Quick Reference
 
 | Command | What It Does |
 |---------|-------------|
 | `/start` | Show help |
 | `/check` | Check now |
 | `/status` | Show bot status |
-| `/stop` | Stop bot |
 
 ---
 

@@ -83,7 +83,9 @@ The scraper looks for this exact text on the appointment page:
         ↓
 3. Configure Telegram (.env file)
         ↓
-4. Run: python bot.py
+4. Choose a run mode after testing:
+  - `python bot.py` for the long-running bot
+  - `python run_check_once.py` or cron for one-shot checks
 ```
 
 ---
@@ -116,6 +118,11 @@ playwright install chromium
 - Website might be down: https://halle.de/
 - Try again in a few minutes
 
+### Error: Cloudflare block detected
+- The target site is blocking the server IP
+- Try from another machine or server
+- Oracle may work even if GitHub Actions did not
+
 ### Screenshot shows nothing
 - Website might have blocked headless browsers
 - This would need a different solution (not Playwright)
@@ -125,10 +132,10 @@ playwright install chromium
 ## What To Do After Testing
 
 1. **If test_scraper.py works** ✓
-   - Get Telegram bot token from @BotFather
-   - Get your Telegram chat ID
-   - Edit `.env` file with credentials
-   - Run `python bot.py`
+  - Get Telegram bot token from @BotFather
+  - Get your Telegram chat ID or group chat ID
+  - Edit `.env` file with credentials
+  - Run `python bot.py` or `python run_check_once.py`
 
 2. **If test_scraper.py fails** ✗
    - Run `python debug_scraper.py`

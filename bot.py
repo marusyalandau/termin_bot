@@ -39,7 +39,6 @@ Available commands:
 /start - Show this message
 /check - Check appointments now
 /status - Show bot status
-/stop - Stop the bot
 
 This bot checks for available appointment slots for 'Staatsangehörigkeitsangelegenheiten' 
 and notifies you when slots become available.
@@ -84,29 +83,28 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("Starting periodic appointment check...")
     
     result = await check_appointments()
-    
-    message = None
-    
+
     if result['error']:
-        message = f"❌ Error during check: {result['error']}"
-    elif result['available']:
+        logger.warning("Periodic check failed: %s", result['error'])
+        notified_state['last_available'] = False
+        return
+
+    if result['available']:
         message = f"✅ AVAILABLE! {result['message']}\n\nSlots:\n"
         for slot in result['slots']:
             message += f"  • {slot}\n"
         message += f"\n🔗 Check here: https://halle.de/serviceportal/online-terminvergabe/online-terminvereinbarung-einbuergerungsbehoerde-standesamt"
         notified_state['last_available'] = True
-    else:
-        # Only log, don't send message every time
-        logger.info(f"No appointments available: {result['message']}")
-        if notified_state['last_available']:
-            message = "😢 No more appointments available"
-            notified_state['last_available'] = False
-    
-    if message and CHAT_ID:
-        try:
-            await context.bot.send_message(chat_id=CHAT_ID, text=message)
-        except Exception as e:
-            logger.error(f"Failed to send message: {e}")
+
+        if CHAT_ID:
+            try:
+                await context.bot.send_message(chat_id=CHAT_ID, text=message)
+            except Exception as e:
+                logger.error(f"Failed to send message: {e}")
+        return
+
+    logger.info(f"No appointments available: {result['message']}")
+    notified_state['last_available'] = False
 
 
 async def main() -> None:
@@ -137,6 +135,7 @@ async def main() -> None:
     # Start the bot
     logger.info("Starting Halle Appointment Bot...")
     logger.info(f"Check interval: {CHECK_INTERVAL} seconds")
+    logger.info("Periodic notifications are sent only when appointments are available.")
     
     await application.initialize()
     await application.start()

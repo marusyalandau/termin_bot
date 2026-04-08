@@ -1,6 +1,6 @@
 """Run a single appointment check and send one Telegram message.
 
-Designed for cron/GitHub Actions usage (no long-running polling bot).
+Designed for cron usage (no long-running polling bot).
 """
 
 import asyncio
@@ -75,7 +75,7 @@ async def main() -> int:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     send_no_appointment_message = _truthy(
-        os.getenv("SEND_NO_APPOINTMENT_MESSAGE"), default=True
+        os.getenv("SEND_NO_APPOINTMENT_MESSAGE"), default=False
     )
 
     if not token or not chat_id:
@@ -84,10 +84,8 @@ async def main() -> int:
 
     result = await check_appointments()
 
-    # Always send Cloudflare block alerts (actionable, machine config issue)
-    is_cloudflare = result.get("cloudflare_blocked", False)
-    if (not result.get("available")) and (not result.get("error")) and (not send_no_appointment_message) and (not is_cloudflare):
-        logger.info("No appointments found; SEND_NO_APPOINTMENT_MESSAGE is false, skipping message.")
+    if (not result.get("available")) and (not send_no_appointment_message):
+        logger.info("No appointments found or check failed; SEND_NO_APPOINTMENT_MESSAGE is false, skipping message.")
         return 0
 
     message = build_message(result)
