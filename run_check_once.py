@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from telegram import Bot
 
 from scraper import check_appointments
+from hints_state import load_known_hints, save_known_hints, get_new_hints
 
 
 logging.basicConfig(
@@ -83,6 +84,22 @@ async def main() -> int:
         return 2
 
     result = await check_appointments()
+
+    if result.get("available"):
+        current_hints = {slot for slot in (result.get("slots") or []) if slot}
+        known_hints = load_known_hints()
+        new_hints = get_new_hints(current_hints, known_hints)
+
+        if new_hints:
+            # Persist current hints once genuinely new entries appear.
+            save_known_hints(current_hints)
+            result["slots"] = sorted(new_hints)
+            result["message"] = "New appointments detected!"
+        else:
+            logger.info("Appointments found but no new hints since last saved check.")
+            result["available"] = False
+            result["slots"] = []
+            result["message"] = "No new appointments since last check"
 
     if (not result.get("available")) and (not send_no_appointment_message):
         logger.info("No appointments found or check failed; SEND_NO_APPOINTMENT_MESSAGE is false, skipping message.")

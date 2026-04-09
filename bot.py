@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from scraper import check_appointments
+from hints_state import load_known_hints, save_known_hints, get_new_hints
 
 # Load environment variables
 load_dotenv()
@@ -89,8 +90,20 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if result['available']:
+        current_hints = {slot for slot in (result.get('slots') or []) if slot}
+        known_hints = load_known_hints()
+        new_hints = get_new_hints(current_hints, known_hints)
+
+        if not new_hints:
+            logger.info("Appointments found but no new hints since last saved check.")
+            notified_state['last_available'] = False
+            return
+
+        # Store the latest full set when new hints appear.
+        save_known_hints(current_hints)
+
         message = f"✅ AVAILABLE! {result['message']}\n\nSlots:\n"
-        for slot in result['slots']:
+        for slot in sorted(new_hints):
             message += f"  • {slot}\n"
         message += f"\n🔗 Check here: {APPOINTMENT_LINK}"
         notified_state['last_available'] = True
