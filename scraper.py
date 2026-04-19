@@ -10,7 +10,6 @@ import re
 import os
 import random
 import time
-import json
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -54,13 +53,57 @@ async def _simulate_human(page):
     except Exception:
         pass
 
-def _extract_slot_hints(text: str) -> list[str]:
-    # Collect likely appointment hints shown on the booking page.
-    dates = re.findall(r"\b\d{1,2}\.\d{1,2}\.\d{4}\b", text)
-    times = re.findall(r"\b\d{1,2}:\d{2}\b", text)
+def _extract_slots_by_date(text: str) -> dict[str, list[str]]:
+    """Infer date -> times mapping from page text lines.
 
-    hints = sorted(set(dates + times))
-    return hints[:20]
+    The booking page often mixes dates and times in nearby lines. This parser
+    associates times with the most recently seen date line and also supports
+    lines that contain both dates and times.
+    """
+    date_pattern = re.compile(r"\b\d{1,2}\.\d{1,2}\.\d{4}\b")
+    time_pattern = re.compile(r"\b\d{1,2}:\d{2}\b")
+
+    slots_by_date: dict[str, list[str]] = {}
+    current_dates: list[str] = []
+
+    for raw_line in text.splitlines():
+        line = " ".join(raw_line.split())
+        if not line:
+            continue
+
+        dates_in_line = list(dict.fromkeys(date_pattern.findall(line)))
+        times_in_line = list(dict.fromkeys(time_pattern.findall(line)))
+
+        if dates_in_line:
+            current_dates = dates_in_line
+            for date in dates_in_line:
+                slots_by_date.setdefault(date, [])
+
+        if times_in_line and current_dates:
+            for date in current_dates:
+                bucket = slots_by_date.setdefault(date, [])
+                for slot_time in times_in_line:
+                    if slot_time not in bucket:
+                        bucket.append(slot_time)
+
+    # Keep deterministic output for stable comparisons/messages.
+    normalized: dict[str, list[str]] = {}
+    for date in sorted(slots_by_date):
+        times = sorted(set(slots_by_date[date]))
+        normalized[date] = times
+    return normalized
+
+
+def _flatten_slot_map(slots_by_date: dict[str, list[str]]) -> list[str]:
+    """Flatten mapping into display-ready entries for backward compatibility."""
+    flattened: list[str] = []
+    for date in sorted(slots_by_date):
+        times = slots_by_date[date]
+        if times:
+            flattened.extend([f"{date} {slot_time}" for slot_time in times])
+        else:
+            flattened.append(date)
+    return flattened
 
 
 def _has_no_appointments_text(text: str) -> bool:
@@ -267,7 +310,8 @@ async def check_appointments():
                 main_content = await page.locator("body").text_content() or ""
                 logger.info(f"Page content length: {len(main_content)} characters")
 
-                slot_hints = _extract_slot_hints(main_content)
+                slots_by_date = _extract_slots_by_date(main_content)
+                slot_hints = _flatten_slot_map(slots_by_date)
                 has_no_appointments_text = _has_no_appointments_text(main_content)
                 has_positive_indicators = _has_positive_availability_indicators(main_content)
 
@@ -293,6 +337,7 @@ async def check_appointments():
                         'available': True,
                         'message': 'Appointments may be available!',
                         'slots': slot_hints or ["Available slots detected"],
+                        'slots_by_date': slots_by_date,
                         'error': None
                     }
 

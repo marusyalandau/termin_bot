@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from telegram import Bot
 
 from scraper import check_appointments
-from hints_state import load_known_hints, save_known_hints, get_new_hints
+from hints_state import load_known_hints, save_known_hints, get_new_hints, build_slot_keys
 
 
 logging.basicConfig(
@@ -26,6 +26,19 @@ def _truthy(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _select_new_slots_by_date(slots_by_date: dict[str, list[str]], new_keys: set[str]) -> dict[str, list[str]]:
+    selected: dict[str, list[str]] = {}
+    for date in sorted(slots_by_date):
+        times = [
+            slot_time
+            for slot_time in slots_by_date[date]
+            if f"{date}|{slot_time}" in new_keys
+        ]
+        if times or f"{date}|" in new_keys:
+            selected[date] = sorted(set(times))
+    return selected
 
 
 def build_message(result: dict) -> str:
@@ -52,12 +65,17 @@ def build_message(result: dict) -> str:
 
     if result.get("available"):
         slots = result.get("slots") or []
+        slots_by_date = result.get("slots_by_date") or {}
         lines = [
             f"✅ {bot_label}",
             f"Zeit: {now_utc}",
             "Status: Termine moeglich verfuegbar!",
         ]
-        if slots:
+        if slots_by_date:
+            lines.append("Neue Slots nach Datum:")
+            for date in sorted(slots_by_date):
+                lines.append(f"- {date}")
+        elif slots:
             lines.append("Gefundene Hinweise:")
             lines.extend([f"- {slot}" for slot in slots])
         lines.append(f"Link: {appointment_link}")
@@ -86,19 +104,22 @@ async def main() -> int:
     result = await check_appointments()
 
     if result.get("available"):
-        current_hints = {slot for slot in (result.get("slots") or []) if slot}
+        slots_by_date = result.get("slots_by_date") or {}
+        current_hints = build_slot_keys(slots_by_date, result.get("slots") or [])
         known_hints = load_known_hints()
         new_hints = get_new_hints(current_hints, known_hints)
 
         if new_hints:
             # Persist current hints once genuinely new entries appear.
-            save_known_hints(current_hints)
+            save_known_hints(current_hints, slots_by_date=slots_by_date)
+            result["slots_by_date"] = _select_new_slots_by_date(slots_by_date, new_hints)
             result["slots"] = sorted(new_hints)
             result["message"] = "New appointments detected!"
         else:
             logger.info("Appointments found but no new hints since last saved check.")
             result["available"] = False
             result["slots"] = []
+            result["slots_by_date"] = {}
             result["message"] = "No new appointments since last check"
 
     if (not result.get("available")) and (not send_no_appointment_message):

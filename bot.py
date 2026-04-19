@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from scraper import check_appointments
-from hints_state import load_known_hints, save_known_hints, get_new_hints
+from hints_state import load_known_hints, save_known_hints, get_new_hints, build_slot_keys
 
 # Load environment variables
 load_dotenv()
@@ -20,6 +20,18 @@ logging.basicConfig(
     filename="bot.log"
 )
 logger = logging.getLogger(__name__)
+
+
+def _format_slots_by_date_for_message(slots_by_date: dict[str, list[str]], new_keys: set[str]) -> str:
+    """Build a readable date-only message block for newly discovered slots."""
+    dates: list[str] = []
+    for date in sorted(slots_by_date):
+        has_new_time = any(f"{date}|{slot_time}" in new_keys for slot_time in slots_by_date[date])
+        has_date_only_key = f"{date}|" in new_keys
+        if has_new_time or has_date_only_key:
+            dates.append(date)
+
+    return "\n".join([f"  • {date}" for date in dates])
 
 # Configuration
 import random
@@ -83,16 +95,23 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.warning("Periodic check failed: %s", result['error'])
         notified_state['last_available'] = False
     elif result['available']:
-        current_hints = {slot for slot in (result.get('slots') or []) if slot}
+        slots_by_date = result.get('slots_by_date') or {}
+        current_hints = build_slot_keys(slots_by_date, result.get('slots') or [])
         known_hints = load_known_hints()
         new_hints = get_new_hints(current_hints, known_hints)
 
         if new_hints:
             # Store the latest full set when new hints appear.
-            save_known_hints(current_hints)
+            save_known_hints(current_hints, slots_by_date=slots_by_date)
             message = f"✅ AVAILABLE! {result['message']}\n\nNew slots:\n"
-            for slot in sorted(new_hints):
-                message += f"  • {slot}\n"
+
+            grouped_block = _format_slots_by_date_for_message(slots_by_date, new_hints)
+            if grouped_block:
+                message += grouped_block
+            else:
+                # Fallback path for unstructured slot values.
+                for slot in sorted(new_hints):
+                    message += f"  • {slot}\n"
             message += f"\n🔗 Check here: {APPOINTMENT_LINK}"
             notified_state['last_available'] = True
             if CHAT_ID:
