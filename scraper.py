@@ -8,9 +8,51 @@ from playwright.async_api import async_playwright
 import logging
 import re
 import os
+import random
+import time
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+
+def _random_delay(min_ms=1200, max_ms=4200):
+    time.sleep(random.uniform(min_ms, max_ms) / 1000)
+
+def _load_user_agents(path="user_agents.txt"):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return [ua.strip() for ua in f if ua.strip()]
+    except Exception:
+        return []
+
+def _pick_user_agent(profile_path=None):
+    # For a single user_data_dir always use the same user-agent
+    ua_file = None
+    if profile_path:
+        ua_file = Path(profile_path) / "user_agent.txt"
+        if ua_file.exists():
+            return ua_file.read_text(encoding="utf-8").strip()
+    agents = _load_user_agents()
+    ua = random.choice(agents) if agents else (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+    if ua_file:
+        ua_file.write_text(ua, encoding="utf-8")
+    return ua
+
+async def _simulate_human(page):
+    # Random mouse movements and scrolling
+    width = random.randint(200, 1200)
+    height = random.randint(200, 900)
+    try:
+        await page.mouse.move(width, height, steps=random.randint(5, 20))
+        await page.mouse.wheel(delta_x=random.randint(0, 100), delta_y=random.randint(0, 500))
+        await page.wait_for_timeout(random.randint(400, 2200))
+    except Exception:
+        pass
 
 def _extract_slot_hints(text: str) -> list[str]:
     # Collect likely appointment hints shown on the booking page.
@@ -122,30 +164,34 @@ async def check_appointments():
             'error': str (if error occurred)
         }
     """
-    # Booking URL is configurable via .env to avoid hardcoded public links.
-    url = os.getenv(
-        "BOOKING_URL",
-    )
-    
+
+    url = os.getenv("BOOKING_URL")
+    # Use persistent context
+    profile_dir = os.getenv("BROWSER_PROFILE_DIR", "browser_profile")
+    Path(profile_dir).mkdir(exist_ok=True)
+    user_agent = _pick_user_agent(profile_dir)
+
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                locale="de-DE",
-                viewport={"width": 1440, "height": 1200},
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                ),
-            )
-            page = await context.new_page()
-            
+            proxy_url = os.getenv("PROXY_URL")
+            context_args = {
+                "user_data_dir": profile_dir,
+                "headless": True,
+                "locale": "de-DE",
+                "viewport": {"width": 1440, "height": 1200},
+                "args": [f"--user-agent={user_agent}"]
+            }
+            if proxy_url:
+                context_args["proxy"] = {"server": proxy_url}
+            browser_context = await p.chromium.launch_persistent_context(**context_args)
+            page = browser_context.pages[0] if browser_context.pages else await browser_context.new_page()
+
             logger.info(f"Opening direct booking URL")
             await page.goto(url, wait_until="networkidle")
-            
-            # Wait for page to fully load
-            await page.wait_for_timeout(5000)
+            await _simulate_human(page)
+            _random_delay()
             await _dismiss_cookie_banner(page)
+            _random_delay()
 
             # Detect Cloudflare block before attempting any interaction
             body_text_early = await page.locator("body").text_content() or ""
@@ -168,7 +214,9 @@ async def check_appointments():
                 }
 
             logger.info("Page loaded, waiting for buttons to appear...")
-            
+            await _simulate_human(page)
+            _random_delay()
+
             # Step 1: Click on "Staatsangehörigkeitsangelegenheiten"
             logger.info("Looking for 'Staatsangehörigkeitsangelegenheiten' button...")
             first_step_ok = False
@@ -178,7 +226,8 @@ async def check_appointments():
                 except Exception:
                     await _click_text(page, "Staatsangehorigkeitsangelegenheiten")
                 logger.info("Clicked 'Staatsangehörigkeitsangelegenheiten'")
-                await page.wait_for_timeout(3000)
+                await _simulate_human(page)
+                _random_delay()
                 first_step_ok = True
             except Exception as e:
                 present = await _has_text(page, "Staatsangehörigkeitsangelegenheiten")
@@ -187,7 +236,7 @@ async def check_appointments():
                     e,
                     present,
                 )
-            
+
             # Step 2: Click on "02. Antrag Einbürgerung"
             logger.info("Looking for '02. Antrag Einbürgerung' button...")
             try:
@@ -196,21 +245,24 @@ async def check_appointments():
                 except Exception:
                     await _click_text(page, "Antrag Einbürgerung")
                 logger.info("Clicked '02. Antrag Einbürgerung'")
-                await page.wait_for_timeout(4000)
+                await _simulate_human(page)
+                _random_delay()
             except Exception as e:
                 present = await _has_text(page, "02. Antrag Einbürgerung") or await _has_text(page, "Antrag Einbürgerung")
                 logger.error(f"Error clicking Antrag Einbürgerung: {e}")
-                await browser.close()
+                await browser_context.close()
                 return {
                     'available': False,
                     'message': 'Error in second step',
                     'slots': [],
                     'error': f"{e} | text_present={present} | first_step_ok={first_step_ok}"
                 }
-            
+
             # Step 3: Access the reservation page and check for available appointments
             logger.info("Checking for available appointments...")
             try:
+                await _simulate_human(page)
+                _random_delay()
                 # Get page content
                 main_content = await page.locator("body").text_content() or ""
                 logger.info(f"Page content length: {len(main_content)} characters")
@@ -225,7 +277,7 @@ async def check_appointments():
                     has_positive_indicators,
                     len(slot_hints),
                 )
-                
+
                 # Save screenshot for debugging
                 try:
                     await page.screenshot(path="/tmp/termin_bot_screenshot.png")
@@ -236,7 +288,7 @@ async def check_appointments():
                 # Prefer positive evidence if both signals exist.
                 if slot_hints or (has_positive_indicators and not has_no_appointments_text):
                     logger.info("Detected available appointment indicators.")
-                    await browser.close()
+                    await browser_context.close()
                     return {
                         'available': True,
                         'message': 'Appointments may be available!',
@@ -246,7 +298,7 @@ async def check_appointments():
 
                 if has_no_appointments_text:
                     logger.info("✓ Found: 'Keine freien Termine gefunden.' - No appointments available")
-                    await browser.close()
+                    await browser_context.close()
                     return {
                         'available': False,
                         'message': 'No appointments currently available',
@@ -256,24 +308,23 @@ async def check_appointments():
                 logger.warning(
                     "No explicit no-appointment text and no positive slot indicators found; returning unknown/no slots."
                 )
-                await browser.close()
+                await browser_context.close()
                 return {
                     'available': False,
                     'message': 'Could not confirm available appointments',
                     'slots': [],
                     'error': None
                 }
-                    
             except Exception as e:
                 logger.error(f"Error checking appointments: {e}")
-                await browser.close()
+                await browser_context.close()
                 return {
                     'available': False,
                     'message': 'Error checking appointments',
                     'slots': [],
                     'error': str(e)
                 }
-                
+
     except Exception as e:
         logger.error(f"Fatal error in check_appointments: {e}")
         return {

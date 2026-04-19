@@ -9,11 +9,14 @@ This project supports two ways to monitor appointments in City X:
 
 Both modes use the same scraper in `scraper.py`.
 
+
 Important:
 
 - Telegram commands work only while `bot.py` is running
 - For automatic checks, choose one mode: either `bot.py` or `cron` + `run_check_once.py`
 - Running both automatic modes at the same time will cause duplicate checks and possibly duplicate notifications
+- Only new slots trigger notifications (no repeat notifications for the same slots)
+- In `bot.py` mode, checks are performed at random intervals between `MIN_CHECK_INTERVAL` and `MAX_CHECK_INTERVAL` (in seconds)
 
 ## Features
 
@@ -36,6 +39,11 @@ Important:
 ```bash
 git clone https://github.com/marusyalandau/termin_bot.git
 cd termin_bot
+- Persistent browser profile (cookies/history reused for stealth)
+- User-agent rotation per profile
+- Proxy support via `PROXY_URL` in `.env`
+- Only new slots trigger notifications
+- Random check intervals (not fixed)
 ```
 
 ### 2. Install dependencies
@@ -56,13 +64,15 @@ cp .env.example .env
 Example:
 
 ```dotenv
+
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 BOT_LABEL=City X Appointment Bot
 APPOINTMENT_LINK=https://example.com/appointments
 BOOKING_URL=https://your-booking-provider.example/calendar
 SEND_NO_APPOINTMENT_MESSAGE=false
-CHECK_INTERVAL=300
+MIN_CHECK_INTERVAL=1560
+MAX_CHECK_INTERVAL=2040
 ```
 
 Meaning:
@@ -76,8 +86,7 @@ Meaning:
 - `CHECK_INTERVAL`: used only by `bot.py`
 
 ### 4. Get Telegram credentials
-
-**Bot token**
+CHECK_INTERVAL=300
 
 - Create the bot via @BotFather with `/newbot`
 
@@ -99,17 +108,18 @@ python bot.py
 
 Use this mode if you want interactive Telegram commands.
 
+
 Available commands:
 
 - `/start`
-- `/check`
 - `/status`
 
-This mode uses `CHECK_INTERVAL` from `.env`.
 
-If `bot.py` is not running, `/start`, `/check`, and `/status` will not work.
+This mode uses `MIN_CHECK_INTERVAL` and `MAX_CHECK_INTERVAL` from `.env` to pick a random interval for each check.
 
-Background notifications in this mode are sent only when appointments are available. Manual `/check` still always replies with the current result.
+If `bot.py` is not running, `/start` and `/status` will not work.
+
+Background notifications in this mode are sent only when new appointments are available (no repeat notifications for the same slots).
 
 ## Mode 2: `run_check_once.py` with cron
 
@@ -117,7 +127,6 @@ Run once manually:
 
 ```bash
 source venv/bin/activate
-python run_check_once.py
 ```
 
 Use this mode if you want scheduled checks without running a long-lived polling bot.
@@ -149,14 +158,15 @@ Notes:
 
 ## Configuration
 
+
 ### `bot.py` frequency
 
-Set `CHECK_INTERVAL` in `.env`:
+Set `MIN_CHECK_INTERVAL` and `MAX_CHECK_INTERVAL` in `.env` (in seconds):
 
-- `3600` = 1 hour
-- `1800` = 30 minutes
-- `600` = 10 minutes
-- `300` = 5 minutes
+- `MIN_CHECK_INTERVAL=1560` (26 minutes)
+- `MAX_CHECK_INTERVAL=2040` (34 minutes)
+
+The bot will pick a random interval in this range for each check.
 
 ### `run_check_once.py` frequency
 
@@ -166,13 +176,12 @@ Set the schedule in `crontab`, for example:
 - `*/10 * * * *` = every 10 minutes
 - `*/20 * * * *` = every 20 minutes
 
-## Oracle / VPS deployment
+ Set `MIN_CHECK_INTERVAL` and `MAX_CHECK_INTERVAL` in `.env` (in seconds):
 
-After you push changes to git, the usual update flow on the server is:
-
-```bash
-cd /home/ubuntu/termin_bot
+ - `MIN_CHECK_INTERVAL=1560` (26 minutes)
+ - `MAX_CHECK_INTERVAL=2040` (34 minutes)
 git pull
+ The bot will pick a random interval in this range for each check.
 ```
 
 Then:

@@ -14,4 +14,8 @@ build/
 *.egg-info/
 *.png
 *.jpg
+*.json
 debug*.txt
+ssh_info.txt
+browser_profile/
+termin-bot.service

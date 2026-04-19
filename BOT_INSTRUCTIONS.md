@@ -1,46 +1,51 @@
+
 # Telegram Bot Instructions
+
+**Note:** In the current configuration, the bot sends notifications only to a single chat — the one specified in the environment variable `TELEGRAM_CHAT_ID`.
+
+## To use the bot interactively (with commands), you must run:
+```
+python bot.py
+```
+in your terminal. The bot will not respond to commands unless bot.py is running.
+At this configuration,
 
 ## Commands
 
+
 Important:
 
-- `/start`, `/check`, and `/status` work only when `bot.py` is currently running
+- `/start` and `/status` work only when `bot.py` is currently running
 - If only `run_check_once.py` is scheduled with `cron`, the bot will send notifications but will not answer commands
 - For automatic checks, choose one mode: `bot.py` or `cron` + `run_check_once.py`
-- Automatic notifications are sent only when appointments are available, unless you explicitly enable no-appointment messages in `run_check_once.py`
+- Automatic notifications are sent only when new appointments are available (no repeat notifications for the same slots)
 
 Here are all the commands you can use with the City X Appointment Bot:
+
 
 ### `/start`
 Shows welcome message and all available commands. Start here if you need help!
 
-### `/check`
-Check for available appointments **immediately**. Use this if you want to manually check right now instead of waiting for the automatic check.
-
-**Response**: The bot will:
-- Show ✅ if appointments are available
-- List all available time slots
-- Show ❌ if no appointments are available
-
 ### `/status`
 Shows the current bot status including:
 - Last check time
-- Check interval (how often it checks)
+- Next scheduled check (random interval)
 - Whether an appointment was previously found
 
 Use this to verify the bot is running.
 
 ---
 
+
 ## Automatic Checks
 
-The bot automatically checks for appointments every **1 hour** by default in `bot.py` mode. This can be changed with `CHECK_INTERVAL` in `.env`.
+The bot automatically checks for appointments at random intervals (26–34 minutes by default, configurable via `.env` with `MIN_CHECK_INTERVAL` and `MAX_CHECK_INTERVAL`).
 
 ### How You'll Be Notified
 
-When the bot finds available appointment slots, you'll receive a Telegram message that shows:
+When the bot finds new available appointment slots, you'll receive a Telegram message that shows:
 - ✅ **Available!** notification
-- List of available time slots
+- List of new available time slots
 - Direct link to the booking page
 
 ### When No Appointments Are Found
@@ -48,19 +53,20 @@ When the bot finds available appointment slots, you'll receive a Telegram messag
 The bot will:
 - Continue checking silently in the background
 - **Not spam you** with "no appointments" messages
-- Alert you **only when** appointments become available
+- Alert you **only when new** appointments become available (no repeat notifications for the same slots)
 
 ---
+
 
 ## Usage Tips
 
 1. **First Run**: Send `/start` to see this help
-2. **Manual Check**: Send `/check` to see results immediately
-3. **Let It Run**: The bot checks automatically based on `CHECK_INTERVAL`
-4. **Keep Your Chat Open**: Notifications will come to this chat
-5. **When Found**: Click the link in the notification to book immediately
+2. **Let It Run**: The bot checks automatically at random intervals
+3. **Keep Your Chat Open**: Notifications will come to this chat
+4. **When Found**: Click the link in the notification to book immediately
 
 ---
+
 
 ## Configuration
 
@@ -72,15 +78,10 @@ You can keep public docs generic and use real links only in your private `.env`:
 
 The bot's check interval can be customized:
 
-| Interval | Frequency |
-|----------|-----------|
-| 300 | Every 5 minutes |
-| 600 | Every 10 minutes |
-| 1800 | Every 30 minutes |
-| 3600 | Every 1 hour (default) |
-| 7200 | Every 2 hours |
+- `MIN_CHECK_INTERVAL=1560` (26 minutes)
+- `MAX_CHECK_INTERVAL=2040` (34 minutes)
 
-Note: Don't set it too low (less than 5 minutes) to avoid server overload.
+Note: Don't set intervals too low (less than 5 minutes) to avoid server overload.
 
 ---
 
@@ -98,32 +99,12 @@ In this mode:
 
 ---
 
-## FAQ
-
-**Q: Will the bot spam me?**
-A: No. Automatic checks are silent when there are no appointments. Manual `/check` still replies with the current result.
-
-**Q: How long does a check take?**
-A: 30-60 seconds. The bot opens a browser, navigates through the website, and checks for slots.
-
-**Q: Can I change how often it checks?**
-A: Yes! Edit the `CHECK_INTERVAL` in the bot's .env file and restart.
-
-**Q: What if the website changes?**
-A: The bot will report an error. Contact the bot administrator to update the selectors.
-
-**Q: Can multiple people use the same bot?**
-A: In `bot.py` mode, multiple people can use commands if the bot is running. In `run_check_once.py` mode, notifications go only to the configured `TELEGRAM_CHAT_ID`, so use a group chat if multiple people should receive them.
-
----
 
 ## Example Messages
 
-### When Appointments Are Found
+### When New Appointments Are Found
 ```
-✅ AVAILABLE! Found 3 available appointment slots!
-
-Slots:
+✅ AVAILABLE! New slots:
   • 15.04.2026
   • 16.04.2026
   • 17.04.2026
@@ -131,22 +112,15 @@ Slots:
 🔗 Check here: https://example.com/appointments
 ```
 
-### When No Appointments Are Available
-```
-❌ No appointments currently available
-```
-
-This kind of message is returned by manual `/check`. Automatic background checks stay silent by default.
+If no new appointments are found, the bot stays silent.
 
 ### Status Check
 ```
 📊 Bot Status
 
 Last check: 2026-04-07 14:30:45
-Check interval: 3600 seconds (60 minutes)
+Next check: 2026-04-07 15:00:00
 Appointment found: No
-
-The bot will automatically check for appointments every 60 minutes.
 ```
 
 ---
@@ -173,16 +147,25 @@ The bot will automatically check for appointments every 60 minutes.
 
 ---
 
+
 ## Quick Reference
 
-| Command | What It Does |
-|---------|-------------|
-| `/start` | Show help |
-| `/check` | Check now |
+| Command   | What It Does    |
+|-----------|----------------|
+| `/start`  | Show help       |
 | `/status` | Show bot status |
 
 ---
 
-**Last Updated**: April 7, 2026
+
+**Last Updated**: April 19, 2026
 
 For more information, see the full README.md or QUICKSTART.md
+
+---
+**Technical notes:**
+- The bot uses a persistent browser profile for stealth (cookies/history are reused)
+- User-agent is randomly selected per profile
+- Supports proxy via `PROXY_URL` in `.env`
+- Only new slots trigger notifications
+- Random check intervals (not fixed)
