@@ -3,7 +3,9 @@
 import os
 import logging
 import asyncio
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -28,6 +30,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress httpx request logs — they expose the bot token in the URL and are too noisy
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def _format_slots_by_date_for_message(slots_by_date: dict[str, list[str]], new_keys: set[str]) -> str:
     """Build a readable date-only message block for newly discovered slots."""
@@ -51,6 +56,40 @@ APPOINTMENT_LINK = os.getenv("APPOINTMENT_LINK")
 
 MIN_INTERVAL = int(os.getenv("MIN_CHECK_INTERVAL", str(DEFAULT_MIN_INTERVAL)))  # Can be set via .env
 MAX_INTERVAL = int(os.getenv("MAX_CHECK_INTERVAL", str(DEFAULT_MAX_INTERVAL)))
+MAX_CONSECUTIVE_ERRORS = int(os.getenv("MAX_CONSECUTIVE_ERRORS", "5"))
+STATUS_TIMEZONE_NAME = os.getenv("STATUS_TIMEZONE", "Europe/Berlin")
+
+
+def _status_timezone() -> timezone | ZoneInfo:
+    try:
+        return ZoneInfo(STATUS_TIMEZONE_NAME)
+    except ZoneInfoNotFoundError:
+        logger.warning(
+            "Invalid STATUS_TIMEZONE='%s', falling back to UTC.",
+            STATUS_TIMEZONE_NAME,
+        )
+        return timezone.utc
+
+
+def _format_status_time(ts: datetime | None) -> str:
+    if ts is None:
+        return "Never"
+
+    local_dt = ts.astimezone(_status_timezone())
+    offset = local_dt.utcoffset()
+    if offset is None:
+        return local_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    hours, minutes = divmod(abs(total_minutes), 60)
+
+    if minutes == 0:
+        gmt_suffix = f"GMT{sign}{hours}"
+    else:
+        gmt_suffix = f"GMT{sign}{hours:02d}:{minutes:02d}"
+
+    return f"{local_dt.strftime('%Y-%m-%d %H:%M:%S')} {gmt_suffix}"
 
 
 def _notify_max_date():
@@ -72,9 +111,11 @@ def _notify_max_date():
 notified_state = {
     "last_available": False,
     "last_slots_found": False,
+    "last_slots_outside_filter": False,
     "last_notification_sent": False,
     "last_check_time": None,
     "next_check_time": None,
+    "consecutive_errors": 0,
 }
 
 
@@ -97,9 +138,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     last_check = notified_state.get("last_check_time")
     next_check = notified_state.get("next_check_time")
     max_date = _notify_max_date()
-    last_check_str = last_check.strftime('%Y-%m-%d %H:%M:%S') if last_check else 'Never'
-    next_check_str = next_check.strftime('%Y-%m-%d %H:%M:%S') if next_check else 'Unknown'
-    found = 'Yes' if notified_state['last_slots_found'] else 'No'
+    last_check_str = _format_status_time(last_check)
+    next_check_str = _format_status_time(next_check) if next_check else 'Unknown'
+    if notified_state['last_slots_found']:
+        found = 'Yes'
+    elif notified_state.get('last_slots_outside_filter'):
+        found = 'Found, but all outside date filter'
+    else:
+        found = 'No'
     notified = 'Yes' if notified_state['last_notification_sent'] else 'No'
     filter_status = (
         f"Enabled (<= {max_date.strftime('%d.%m.%Y')})"
@@ -118,19 +164,57 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(message)
 
 
+async def _notify_error(context: ContextTypes.DEFAULT_TYPE, error_text: str) -> None:
+    """Send an error notification to the configured chat."""
+    if CHAT_ID:
+        try:
+            await context.bot.send_message(chat_id=CHAT_ID, text=error_text)
+        except Exception as exc:
+            logger.error("Failed to send error notification: %s", exc)
+
+
 async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Periodic job to check for appointments"""
     logger.info("Starting periodic appointment check...")
 
-    notified_state["last_check_time"] = datetime.now()
+    notified_state["last_check_time"] = datetime.now(timezone.utc)
     notified_state["last_notification_sent"] = False
     result = await check_appointments()
 
-    if result['error']:
-        logger.warning("Periodic check failed: %s", result['error'])
+    is_error = bool(result.get('error')) or bool(result.get('cloudflare_blocked'))
+
+    if is_error:
+        notified_state['consecutive_errors'] += 1
         notified_state['last_available'] = False
         notified_state['last_slots_found'] = False
+        notified_state['last_slots_outside_filter'] = False
+
+        if result.get('cloudflare_blocked'):
+            error_text = (
+                f"🚫 {BOT_LABEL} — Cloudflare block detected\n"
+                f"Blocked IP: {result.get('blocked_ip', 'unknown')}\n"
+                f"Consecutive errors: {notified_state['consecutive_errors']}/{MAX_CONSECUTIVE_ERRORS}"
+            )
+        else:
+            error_text = (
+                f"❌ {BOT_LABEL} — check failed\n"
+                f"Error: {result.get('error')}\n"
+                f"Consecutive errors: {notified_state['consecutive_errors']}/{MAX_CONSECUTIVE_ERRORS}"
+            )
+
+        logger.warning("Periodic check failed: %s", result.get('error') or 'cloudflare_blocked')
+        await _notify_error(context, error_text)
+
+        if notified_state['consecutive_errors'] >= MAX_CONSECUTIVE_ERRORS:
+            stop_text = (
+                f"⛔ {BOT_LABEL} is stopping after {MAX_CONSECUTIVE_ERRORS} consecutive errors.\n"
+                "Please check the server and restart manually."
+            )
+            await _notify_error(context, stop_text)
+            logger.error("Too many consecutive errors (%s), stopping.", MAX_CONSECUTIVE_ERRORS)
+            sys.exit(0)
     elif result['available']:
+        notified_state['last_slots_outside_filter'] = False
         slots_by_date = result.get('slots_by_date') or {}
         max_date = _notify_max_date()
         if max_date is not None:
@@ -143,7 +227,9 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             notified_state['last_available'] = False
             notified_state['last_slots_found'] = False
+            notified_state['last_slots_outside_filter'] = True
         else:
+            notified_state['consecutive_errors'] = 0
             notified_state['last_slots_found'] = True
             current_hints = build_slot_keys(slots_by_date, [])
             known_hints = load_known_hints()
@@ -170,13 +256,15 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
                 notified_state['last_available'] = True
     else:
         logger.info(f"No appointments available: {result['message']}")
+        notified_state['consecutive_errors'] = 0
         notified_state['last_available'] = False
         notified_state['last_slots_found'] = False
+        notified_state['last_slots_outside_filter'] = False
 
     # Random delay before the next check
     next_interval = random.randint(MIN_INTERVAL, MAX_INTERVAL)
     from datetime import timedelta
-    next_check_time = datetime.now() + timedelta(seconds=next_interval)
+    next_check_time = datetime.now(timezone.utc) + timedelta(seconds=next_interval)
     notified_state["next_check_time"] = next_check_time
     logger.info(f"Next check in {next_interval // 60} min {next_interval % 60} sec.")
     context.job_queue.run_once(periodic_check, when=next_interval)
@@ -199,8 +287,9 @@ async def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
 
-    # Schedule the first periodic check immediately
-    application.job_queue.run_once(periodic_check, when=0)
+    # Schedule the first periodic check after a short delay to ensure the
+    # scheduler has fully started (avoids APScheduler misfire on when=0).
+    application.job_queue.run_once(periodic_check, when=10)
 
     # Start the bot
     logger.info("Starting %s...", BOT_LABEL)
