@@ -61,6 +61,7 @@ MAX_INTERVAL = int(os.getenv("MAX_CHECK_INTERVAL", str(DEFAULT_MAX_INTERVAL)))
 MAX_CONSECUTIVE_ERRORS = int(os.getenv("MAX_CONSECUTIVE_ERRORS", "5"))
 STATUS_TIMEZONE_NAME = os.getenv("STATUS_TIMEZONE", "Europe/Berlin")
 STOP_ON_NON_TRANSIENT_SCRAPER_ERROR = os.getenv("STOP_ON_NON_TRANSIENT_SCRAPER_ERROR", "true").strip().lower() in {"1", "true", "yes", "on"}
+STOP_ON_CLOUDFLARE_BLOCK = os.getenv("STOP_ON_CLOUDFLARE_BLOCK", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _status_timezone() -> timezone | ZoneInfo:
@@ -311,6 +312,16 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         logger.warning("Periodic check failed: %s", result.get('error') or 'cloudflare_blocked')
         await _notify_error(context, error_text)
+
+        if STOP_ON_CLOUDFLARE_BLOCK and result.get('cloudflare_blocked'):
+            stop_text = (
+                f"⛔ {BOT_LABEL} stopped due to Cloudflare block.\n"
+                f"Blocked IP: {result.get('blocked_ip', 'unknown')}\n"
+                "Retrying is unlikely to help until the IP/proxy changes."
+            )
+            await _notify_fatal_error(stop_text, context=context)
+            logger.error("Stopping bot due to Cloudflare block.")
+            sys.exit(0)
 
         if STOP_ON_NON_TRANSIENT_SCRAPER_ERROR and _is_non_transient_scraper_error(result.get('error')):
             stop_text = (
