@@ -6,8 +6,10 @@ import asyncio
 import sys
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import httpx
 from dotenv import load_dotenv
 from telegram import Update
+from telegram.error import InvalidToken, NetworkError, RetryAfter, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes
 from scraper import check_appointments
 from hints_state import (
@@ -58,6 +60,7 @@ MIN_INTERVAL = int(os.getenv("MIN_CHECK_INTERVAL", str(DEFAULT_MIN_INTERVAL)))  
 MAX_INTERVAL = int(os.getenv("MAX_CHECK_INTERVAL", str(DEFAULT_MAX_INTERVAL)))
 MAX_CONSECUTIVE_ERRORS = int(os.getenv("MAX_CONSECUTIVE_ERRORS", "5"))
 STATUS_TIMEZONE_NAME = os.getenv("STATUS_TIMEZONE", "Europe/Berlin")
+STOP_ON_NON_TRANSIENT_SCRAPER_ERROR = os.getenv("STOP_ON_NON_TRANSIENT_SCRAPER_ERROR", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _status_timezone() -> timezone | ZoneInfo:
@@ -106,6 +109,55 @@ def _notify_max_date():
         configured,
     )
     return None
+
+
+def _is_transient_exception(exc: Exception) -> bool:
+    """Return True for errors where restart may recover without code/config changes."""
+    if isinstance(exc, (TimedOut, NetworkError, RetryAfter, asyncio.TimeoutError, OSError, ConnectionError)):
+        return True
+
+    text = str(exc).lower()
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "temporary",
+        "temporarily",
+        "network is unreachable",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "service unavailable",
+        "bad gateway",
+        "name or service not known",
+        "try again",
+        "429",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
+def _should_restart_on_exception(exc: Exception) -> bool:
+    """Map unhandled exception to restart policy for systemd."""
+    if isinstance(exc, InvalidToken):
+        return False
+    return _is_transient_exception(exc)
+
+
+def _is_non_transient_scraper_error(error_text: str | None) -> bool:
+    """Return True for scraper errors unlikely to recover without config/code changes."""
+    if not error_text:
+        return False
+
+    text = error_text.lower()
+    fatal_markers = (
+        "err_name_not_resolved",
+        "name or service not known",
+        "nodename nor servname provided",
+        "invalid url",
+        "failed to parse",
+        "unsupported protocol",
+        "no host supplied",
+    )
+    return any(marker in text for marker in fatal_markers)
 
 # State for status
 notified_state = {
@@ -173,6 +225,61 @@ async def _notify_error(context: ContextTypes.DEFAULT_TYPE, error_text: str) -> 
             logger.error("Failed to send error notification: %s", exc)
 
 
+async def _notify_fatal_error(error_text: str, context: ContextTypes.DEFAULT_TYPE | None = None, update: object | None = None) -> None:
+    """Send fatal error message to configured chat and, when possible, to the current update chat."""
+    target_chats: list[str] = []
+    if isinstance(update, Update) and update.effective_chat:
+        target_chats.append(str(update.effective_chat.id))
+    if CHAT_ID:
+        target_chats.append(str(CHAT_ID))
+
+    # Preserve order and remove duplicates.
+    deduped_targets = list(dict.fromkeys(target_chats))
+    if not deduped_targets:
+        return
+
+    if context is not None:
+        for chat_id in deduped_targets:
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=error_text)
+            except Exception as exc:
+                logger.error("Failed to send fatal error notification to %s: %s", chat_id, exc)
+        return
+
+    if not TELEGRAM_TOKEN:
+        logger.error("Cannot send fatal error notification: TELEGRAM_BOT_TOKEN is missing.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    async with httpx.AsyncClient(timeout=15) as client:
+        for chat_id in deduped_targets:
+            try:
+                response = await client.post(url, json={"chat_id": chat_id, "text": error_text})
+                response.raise_for_status()
+            except Exception as exc:
+                logger.error("Failed to send fatal error notification via Bot API to %s: %s", chat_id, exc)
+
+
+async def _handle_application_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle uncaught handler/job exceptions from python-telegram-bot."""
+    exc = context.error
+    if exc is None:
+        return
+
+    logger.exception("Unhandled application error: %s", exc)
+    if isinstance(exc, Exception) and _is_transient_exception(exc):
+        logger.warning("Transient application error detected; bot will continue running.")
+        return
+
+    stop_text = (
+        f"⛔ {BOT_LABEL} stopped due to non-transient internal error:\n"
+        f"{type(exc).__name__}: {exc}"
+    )
+    await _notify_fatal_error(stop_text, context=context, update=update)
+    logger.error("Stopping bot due to non-transient application error.")
+    sys.exit(0)
+
+
 async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Periodic job to check for appointments"""
     logger.info("Starting periodic appointment check...")
@@ -204,6 +311,16 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         logger.warning("Periodic check failed: %s", result.get('error') or 'cloudflare_blocked')
         await _notify_error(context, error_text)
+
+        if STOP_ON_NON_TRANSIENT_SCRAPER_ERROR and _is_non_transient_scraper_error(result.get('error')):
+            stop_text = (
+                f"⛔ {BOT_LABEL} stopped due to non-transient scraper error:\n"
+                f"{result.get('error')}\n"
+                "This usually means the booking URL/domain is invalid or changed."
+            )
+            await _notify_error(context, stop_text)
+            logger.error("Stopping bot due to non-transient scraper error.")
+            sys.exit(0)
 
         if notified_state['consecutive_errors'] >= MAX_CONSECUTIVE_ERRORS:
             stop_text = (
@@ -286,6 +403,7 @@ async def main() -> None:
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_error_handler(_handle_application_error)
 
     # Schedule the first periodic check after a short delay to ensure the
     # scheduler has fully started (avoids APScheduler misfire on when=0).
@@ -308,4 +426,23 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as exc:
+        logger.exception("Bot terminated with unhandled exception: %s", exc)
+        if _should_restart_on_exception(exc):
+            logger.error("Transient failure: exiting with code 1 to allow systemd restart.")
+            sys.exit(1)
+
+        try:
+            asyncio.run(_notify_fatal_error(
+                (
+                    f"⛔ {BOT_LABEL} stopped due to non-transient startup/runtime error:\n"
+                    f"{type(exc).__name__}: {exc}"
+                )
+            ))
+        except Exception as notify_exc:
+            logger.error("Failed while sending fatal shutdown notification: %s", notify_exc)
+
+        logger.error("Non-transient failure: exiting with code 0 to avoid restart loop.")
+        sys.exit(0)
