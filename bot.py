@@ -8,7 +8,14 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from scraper import check_appointments
-from hints_state import load_known_hints, save_known_hints, get_new_hints, build_slot_keys
+from hints_state import (
+    load_known_hints,
+    save_known_hints,
+    get_new_hints,
+    build_slot_keys,
+    parse_ddmmyyyy,
+    filter_slots_by_max_date,
+)
 
 # Load environment variables
 load_dotenv()
@@ -45,9 +52,27 @@ APPOINTMENT_LINK = os.getenv("APPOINTMENT_LINK")
 MIN_INTERVAL = int(os.getenv("MIN_CHECK_INTERVAL", str(DEFAULT_MIN_INTERVAL)))  # Can be set via .env
 MAX_INTERVAL = int(os.getenv("MAX_CHECK_INTERVAL", str(DEFAULT_MAX_INTERVAL)))
 
+
+def _notify_max_date():
+    configured = os.getenv("NOTIFY_MAX_DATE", "").strip()
+    if not configured:
+        return None
+
+    parsed = parse_ddmmyyyy(configured)
+    if parsed:
+        return parsed
+
+    logger.warning(
+        "Invalid NOTIFY_MAX_DATE='%s', disabling date limit.",
+        configured,
+    )
+    return None
+
 # State for status
 notified_state = {
     "last_available": False,
+    "last_slots_found": False,
+    "last_notification_sent": False,
     "last_check_time": None,
     "next_check_time": None,
 }
@@ -71,14 +96,23 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show bot status"""
     last_check = notified_state.get("last_check_time")
     next_check = notified_state.get("next_check_time")
+    max_date = _notify_max_date()
     last_check_str = last_check.strftime('%Y-%m-%d %H:%M:%S') if last_check else 'Never'
     next_check_str = next_check.strftime('%Y-%m-%d %H:%M:%S') if next_check else 'Unknown'
-    found = 'Yes' if notified_state['last_available'] else 'No'
+    found = 'Yes' if notified_state['last_slots_found'] else 'No'
+    notified = 'Yes' if notified_state['last_notification_sent'] else 'No'
+    filter_status = (
+        f"Enabled (<= {max_date.strftime('%d.%m.%Y')})"
+        if max_date is not None
+        else "Disabled"
+    )
     message = (
         "📊 Bot Status\n\n"
         f"Last check: {last_check_str}\n"
         f"Next check: {next_check_str}\n"
-        f"Appointment found: {found}\n\n"
+        f"Slots found on last check: {found}\n"
+        f"Notification sent on last check: {notified}\n"
+        f"Date filter: {filter_status}\n\n"
         "The bot checks automatically at random intervals (26–34 min by default)."
     )
     await update.message.reply_text(message)
@@ -89,42 +123,55 @@ async def periodic_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("Starting periodic appointment check...")
 
     notified_state["last_check_time"] = datetime.now()
+    notified_state["last_notification_sent"] = False
     result = await check_appointments()
 
     if result['error']:
         logger.warning("Periodic check failed: %s", result['error'])
         notified_state['last_available'] = False
+        notified_state['last_slots_found'] = False
     elif result['available']:
         slots_by_date = result.get('slots_by_date') or {}
-        current_hints = build_slot_keys(slots_by_date, result.get('slots') or [])
-        known_hints = load_known_hints()
-        new_hints = get_new_hints(current_hints, known_hints)
+        max_date = _notify_max_date()
+        if max_date is not None:
+            slots_by_date = filter_slots_by_max_date(slots_by_date, max_date)
 
-        if new_hints:
-            # Store the latest full set when new hints appear.
-            save_known_hints(current_hints, slots_by_date=slots_by_date)
-            message = f"✅ AVAILABLE! {result['message']}\n\nNew slots:\n"
-
-            grouped_block = _format_slots_by_date_for_message(slots_by_date, new_hints)
-            if grouped_block:
-                message += grouped_block
-            else:
-                # Fallback path for unstructured slot values.
-                for slot in sorted(new_hints):
-                    message += f"  • {slot}\n"
-            message += f"\n🔗 Check here: {APPOINTMENT_LINK}"
-            notified_state['last_available'] = True
-            if CHAT_ID:
-                try:
-                    await context.bot.send_message(chat_id=CHAT_ID, text=message)
-                except Exception as e:
-                    logger.error(f"Failed to send message: {e}")
-        else:
-            logger.info("Appointments found but no new hints since last saved check.")
+        if max_date is not None and not slots_by_date:
+            logger.info(
+                "Available slots found, but none are within notification range (<= %s).",
+                max_date.strftime("%d.%m.%Y"),
+            )
             notified_state['last_available'] = False
+            notified_state['last_slots_found'] = False
+        else:
+            notified_state['last_slots_found'] = True
+            current_hints = build_slot_keys(slots_by_date, [])
+            known_hints = load_known_hints()
+            new_hints = get_new_hints(current_hints, known_hints)
+
+            if new_hints:
+                # Store the latest full set when new hints appear.
+                save_known_hints(current_hints, slots_by_date=slots_by_date)
+                message = f"✅ AVAILABLE! {result['message']}\n\nNew slots:\n"
+
+                grouped_block = _format_slots_by_date_for_message(slots_by_date, new_hints)
+                if grouped_block:
+                    message += grouped_block
+                message += f"\n🔗 Check here: {APPOINTMENT_LINK}"
+                notified_state['last_available'] = True
+                notified_state['last_notification_sent'] = True
+                if CHAT_ID:
+                    try:
+                        await context.bot.send_message(chat_id=CHAT_ID, text=message)
+                    except Exception as e:
+                        logger.error(f"Failed to send message: {e}")
+            else:
+                logger.info("Appointments found but no new hints since last saved check.")
+                notified_state['last_available'] = True
     else:
         logger.info(f"No appointments available: {result['message']}")
         notified_state['last_available'] = False
+        notified_state['last_slots_found'] = False
 
     # Random delay before the next check
     next_interval = random.randint(MIN_INTERVAL, MAX_INTERVAL)

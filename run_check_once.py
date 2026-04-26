@@ -12,7 +12,14 @@ from dotenv import load_dotenv
 from telegram import Bot
 
 from scraper import check_appointments
-from hints_state import load_known_hints, save_known_hints, get_new_hints, build_slot_keys
+from hints_state import (
+    load_known_hints,
+    save_known_hints,
+    get_new_hints,
+    build_slot_keys,
+    parse_ddmmyyyy,
+    filter_slots_by_max_date,
+)
 
 
 logging.basicConfig(
@@ -26,6 +33,22 @@ def _truthy(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _notify_max_date():
+    configured = os.getenv("NOTIFY_MAX_DATE", "").strip()
+    if not configured:
+        return None
+
+    parsed = parse_ddmmyyyy(configured)
+    if parsed:
+        return parsed
+
+    logger.warning(
+        "Invalid NOTIFY_MAX_DATE='%s', disabling date limit.",
+        configured,
+    )
+    return None
 
 
 def _select_new_slots_by_date(slots_by_date: dict[str, list[str]], new_keys: set[str]) -> dict[str, list[str]]:
@@ -105,22 +128,36 @@ async def main() -> int:
 
     if result.get("available"):
         slots_by_date = result.get("slots_by_date") or {}
-        current_hints = build_slot_keys(slots_by_date, result.get("slots") or [])
-        known_hints = load_known_hints()
-        new_hints = get_new_hints(current_hints, known_hints)
+        max_date = _notify_max_date()
+        if max_date is not None:
+            slots_by_date = filter_slots_by_max_date(slots_by_date, max_date)
 
-        if new_hints:
-            # Persist current hints once genuinely new entries appear.
-            save_known_hints(current_hints, slots_by_date=slots_by_date)
-            result["slots_by_date"] = _select_new_slots_by_date(slots_by_date, new_hints)
-            result["slots"] = sorted(new_hints)
-            result["message"] = "New appointments detected!"
-        else:
-            logger.info("Appointments found but no new hints since last saved check.")
+        if max_date is not None and not slots_by_date:
+            logger.info(
+                "Available slots found, but none are within notification range (<= %s).",
+                max_date.strftime("%d.%m.%Y"),
+            )
             result["available"] = False
             result["slots"] = []
             result["slots_by_date"] = {}
-            result["message"] = "No new appointments since last check"
+            result["message"] = "No appointments in configured date range"
+        else:
+            current_hints = build_slot_keys(slots_by_date, [])
+            known_hints = load_known_hints()
+            new_hints = get_new_hints(current_hints, known_hints)
+
+            if new_hints:
+                # Persist current hints once genuinely new entries appear.
+                save_known_hints(current_hints, slots_by_date=slots_by_date)
+                result["slots_by_date"] = _select_new_slots_by_date(slots_by_date, new_hints)
+                result["slots"] = sorted(new_hints)
+                result["message"] = "New appointments detected!"
+            else:
+                logger.info("Appointments found but no new hints since last saved check.")
+                result["available"] = False
+                result["slots"] = []
+                result["slots_by_date"] = {}
+                result["message"] = "No new appointments since last check"
 
     if (not result.get("available")) and (not send_no_appointment_message):
         logger.info("No appointments found or check failed; SEND_NO_APPOINTMENT_MESSAGE is false, skipping message.")

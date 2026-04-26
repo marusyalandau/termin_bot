@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 
@@ -78,3 +79,28 @@ def build_slot_keys(slots_by_date: dict[str, list[str]] | None, fallback_slots: 
         if value:
             keys.add(value)
     return keys
+
+
+def parse_ddmmyyyy(value: str) -> date | None:
+    """Parse DD.MM.YYYY date values used in slot keys/maps."""
+    try:
+        day_s, month_s, year_s = value.split(".")
+        return date(int(year_s), int(month_s), int(day_s))
+    except Exception:
+        return None
+
+
+def filter_slots_by_max_date(
+    slots_by_date: dict[str, list[str]] | None,
+    max_inclusive: date,
+) -> dict[str, list[str]]:
+    """Keep only slot entries with date <= max_inclusive."""
+    if not slots_by_date:
+        return {}
+
+    filtered: dict[str, list[str]] = {}
+    for slot_date, times in slots_by_date.items():
+        parsed = parse_ddmmyyyy(slot_date)
+        if parsed and parsed <= max_inclusive:
+            filtered[slot_date] = list(times)
+    return filtered

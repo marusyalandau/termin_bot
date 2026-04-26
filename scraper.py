@@ -246,7 +246,7 @@ async def check_appointments():
                 ip_match = re.search(r'\d+\.\d+\.\d+\.\d+', body_text_early)
                 detected_ip = ip_match.group(0) if ip_match else "unknown"
                 logger.warning("Cloudflare block detected! Blocked IP: %s", detected_ip)
-                await browser.close()
+                await browser_context.close()
                 return {
                     'available': False,
                     'message': 'Cloudflare block detected',
